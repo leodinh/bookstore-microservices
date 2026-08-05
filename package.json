@@ -11,7 +11,14 @@
     "build:users": "nest build users-service",
     "build:books": "nest build books-service",
     "build:orders": "nest build orders-service",
-    "format": "prettier --write \"apps/**/*.ts\" \"libs/**/*.ts\"",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:status": "docker compose ps",
+    "migration:generate": "typeorm-ts-node-commonjs migration:generate database/migrations/InitialSchema -d database/data-source.ts -p",
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d database/data-source.ts",
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d database/data-source.ts",
+    "migration:show": "typeorm-ts-node-commonjs migration:show -d database/data-source.ts",
+    "format": "prettier --write \"apps/**/*.ts\" \"libs/**/*.ts\" \"database/**/*.ts\"",
     "start:gateway": "nest start api-gateway --watch",
     "start:users": "nest start users-service --watch",
     "start:books": "nest start books-service --watch",
@@ -29,10 +36,13 @@
     "@nestjs/core": "^11.0.1",
     "@nestjs/microservices": "^11.1.28",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/typeorm": "^11.0.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "pg": "^8.22.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "typeorm": "^1.1.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -80,7 +90,8 @@
       "<rootDir>/libs/"
     ],
     "moduleNameMapper": {
-      "^@app/common(|/.*)$": "<rootDir>/libs/common/src/$1"
+      "^@app/common(|/.*)$": "<rootDir>/libs/common/src/$1",
+      "^@app/database(|/.*)$": "<rootDir>/libs/database/src/$1"
     }
   }
 }

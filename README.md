@@ -52,6 +52,9 @@ curl http://localhost:3000/api/books/catalog
 ## Useful commands
 
 ```bash
+pnpm db:up
+pnpm db:status
+pnpm db:down
 pnpm build
 pnpm lint
 pnpm test
@@ -62,7 +65,7 @@ pnpm start:orders
 ## Learning roadmap
 
 1. Workspace and TCP request/response - current milestone
-2. PostgreSQL, TypeORM, migrations, and seed data
+2. PostgreSQL, TypeORM, migrations, and seed data - in progress
 3. Users signup and password hashing
 4. Books catalog and inventory persistence
 5. Transactional order creation and historical snapshots
@@ -80,3 +83,9 @@ Trace `GET /api/books/catalog` through these files:
 4. `apps/books-service/src/books-service.controller.ts`
 
 The key idea is that HTTP concerns stop at the gateway. The Books service only knows about TCP messages and bookstore logic.
+
+## Milestone 2 notes
+
+PostgreSQL runs in Docker on host port `5433` because port `5432` is commonly occupied by a local PostgreSQL installation. Inside the container PostgreSQL still uses port `5432`.
+
+The shared `DatabaseModule` contains connection infrastructure only. Domain entities and repositories remain owned by their services. `synchronize` is disabled so all schema changes must be expressed as migrations.
