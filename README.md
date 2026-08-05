@@ -55,6 +55,9 @@ curl http://localhost:3000/api/books/catalog
 pnpm db:up
 pnpm db:status
 pnpm db:down
+pnpm migration:show
+pnpm migration:run
+pnpm seed
 pnpm build
 pnpm lint
 pnpm test
