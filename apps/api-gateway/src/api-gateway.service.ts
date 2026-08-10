@@ -7,9 +7,11 @@ import {
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import {
+  CreateBookRequest,
   CreateOrderRequest,
   MESSAGE_PATTERNS,
   SignupUserRequest,
+  UpdateBookBodyRequest,
 } from '@app/common';
 import {
   catchError,
@@ -39,6 +41,27 @@ export class ApiGatewayService {
 
   getBook(id: string) {
     return this.send(this.booksClient, MESSAGE_PATTERNS.books.book.get, { id });
+  }
+
+  createBook(request: CreateBookRequest) {
+    return this.send(
+      this.booksClient,
+      MESSAGE_PATTERNS.books.book.create,
+      request,
+    );
+  }
+
+  updateBook(id: string, request: UpdateBookBodyRequest) {
+    return this.send(this.booksClient, MESSAGE_PATTERNS.books.book.update, {
+      id,
+      ...request,
+    });
+  }
+
+  deactivateBook(id: string) {
+    return this.send(this.booksClient, MESSAGE_PATTERNS.books.book.deactivate, {
+      id,
+    });
   }
 
   signup(request: SignupUserRequest) {

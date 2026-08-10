@@ -38,6 +38,60 @@ describe('ApiGatewayService', () => {
     });
   });
 
+  it('sends create-book through the controlled Books pattern', async () => {
+    const send = jest.fn().mockReturnValue(of({ id: 'book-id' }));
+    const service = new ApiGatewayService(
+      { send } as never,
+      {} as never,
+      {} as never,
+    );
+    const request = {
+      title: 'A Book',
+      author: 'An Author',
+      isbn: '9780000000032',
+      price: 19.99,
+      availableQuantity: 5,
+    };
+
+    await service.createBook(request);
+
+    expect(send).toHaveBeenCalledWith(
+      MESSAGE_PATTERNS.books.book.create,
+      request,
+    );
+  });
+
+  it('sends update-book with its path id', async () => {
+    const send = jest.fn().mockReturnValue(of({ id: 'book-id' }));
+    const service = new ApiGatewayService(
+      { send } as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.updateBook('book-id', { price: 24.99 });
+
+    expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.books.book.update, {
+      id: 'book-id',
+      price: 24.99,
+    });
+  });
+
+  it('maps HTTP deletion to book deactivation', async () => {
+    const send = jest.fn().mockReturnValue(of({ id: 'book-id' }));
+    const service = new ApiGatewayService(
+      { send } as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.deactivateBook('book-id');
+
+    expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.books.book.deactivate, {
+      id: 'book-id',
+    });
+  });
+
   it('translates a structured RPC error into an HTTP exception', async () => {
     const send = jest.fn().mockReturnValue(
       throwError(() => ({

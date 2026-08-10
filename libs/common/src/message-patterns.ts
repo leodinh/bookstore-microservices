@@ -10,7 +10,10 @@ export const MESSAGE_PATTERNS = {
       get: { cmd: 'books.catalog.get' },
     },
     book: {
+      create: { cmd: 'books.book.create' },
+      deactivate: { cmd: 'books.book.deactivate' },
       get: { cmd: 'books.book.get' },
+      update: { cmd: 'books.book.update' },
     },
   },
   orders: {

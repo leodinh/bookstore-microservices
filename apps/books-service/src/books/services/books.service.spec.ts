@@ -25,6 +25,79 @@ describe('BooksService', () => {
     updatedAt: new Date(),
   } satisfies Book;
 
+  it('normalizes and creates a new book', async () => {
+    const createdBook = {
+      ...book,
+      id: 'cc2e50ca-fd12-433e-ae68-8d93e16ec9a1',
+      title: 'A New Book',
+      author: 'An Author',
+      isbn: '9780000000032',
+      description: 'A description',
+      price: '19.90',
+      availableQuantity: 5,
+      soldQuantity: 0,
+      isActive: true,
+    };
+    const repository = {
+      findByIsbn: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue(createdBook),
+    };
+    const service = new BooksService(repository as unknown as BooksRepository);
+
+    const result = await service.createBook({
+      title: ' A New Book ',
+      author: ' An Author ',
+      isbn: '978-0-00000-003-2',
+      description: ' A description ',
+      price: 19.9,
+      availableQuantity: 5,
+    });
+
+    expect(repository.findByIsbn).toHaveBeenCalledWith('9780000000032');
+    expect(repository.create).toHaveBeenCalledWith({
+      title: 'A New Book',
+      author: 'An Author',
+      isbn: '9780000000032',
+      description: 'A description',
+      price: '19.90',
+      availableQuantity: 5,
+      soldQuantity: 0,
+      isActive: true,
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: createdBook.id,
+        isbn: '9780000000032',
+        price: '19.90',
+        isActive: true,
+      }),
+    );
+  });
+
+  it('rejects a duplicate ISBN before creating the book', async () => {
+    const repository = {
+      findByIsbn: jest.fn().mockResolvedValue(book),
+      create: jest.fn(),
+    };
+    const service = new BooksService(repository as unknown as BooksRepository);
+
+    const error = await rejectedValue(
+      service.createBook({
+        title: 'Duplicate',
+        author: 'An Author',
+        isbn: book.isbn,
+        price: 10,
+        availableQuantity: 1,
+      }),
+    );
+
+    expect(error).toBeInstanceOf(RpcException);
+    expect((error as RpcException).getError()).toEqual(
+      expect.objectContaining({ code: 'DUPLICATE_BOOK_ISBN' }),
+    );
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
   it('derives availability from the inventory quantity', async () => {
     const repository = {
       findActiveCatalog: jest.fn().mockResolvedValue([book]),
@@ -63,5 +136,64 @@ describe('BooksService', () => {
     expect((error as RpcException).getError()).toEqual(
       expect.objectContaining({ code: 'BOOK_NOT_FOUND', statusCode: 404 }),
     );
+  });
+
+  it('updates only the supplied book fields', async () => {
+    const bookToUpdate = { ...book, description: 'Original description' };
+    const repository = {
+      findById: jest.fn().mockResolvedValue(bookToUpdate),
+      save: jest.fn((value: Book) => Promise.resolve(value)),
+    };
+    const service = new BooksService(repository as unknown as BooksRepository);
+
+    const result = await service.updateBook({
+      id: book.id,
+      title: ' Updated Title ',
+      price: 49.5,
+      availableQuantity: 7,
+    });
+
+    expect(repository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Updated Title',
+        description: 'Original description',
+        price: '49.50',
+        availableQuantity: 7,
+        author: book.author,
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({ title: 'Updated Title', price: '49.50' }),
+    );
+  });
+
+  it('rejects an update with no fields', async () => {
+    const repository = {
+      findById: jest.fn().mockResolvedValue({ ...book }),
+    };
+    const service = new BooksService(repository as unknown as BooksRepository);
+
+    const error = await rejectedValue(service.updateBook({ id: book.id }));
+
+    expect(error).toBeInstanceOf(RpcException);
+    expect((error as RpcException).getError()).toEqual(
+      expect.objectContaining({ code: 'INVALID_BOOK_UPDATE' }),
+    );
+  });
+
+  it('deactivates a book instead of deleting it', async () => {
+    const bookToDeactivate = { ...book, isActive: true };
+    const repository = {
+      findById: jest.fn().mockResolvedValue(bookToDeactivate),
+      save: jest.fn((value: Book) => Promise.resolve(value)),
+    };
+    const service = new BooksService(repository as unknown as BooksRepository);
+
+    const result = await service.deactivateBook(book.id);
+
+    expect(repository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: book.id, isActive: false }),
+    );
+    expect(result.isActive).toBe(false);
   });
 });
