@@ -13,6 +13,9 @@ export class ApiGatewayController {
       path: request.path,
       body,
       query: request.query,
+      headers: {
+        'idempotency-key': request.get('Idempotency-Key'),
+      },
     });
   }
 }

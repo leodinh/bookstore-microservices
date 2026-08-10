@@ -34,6 +34,7 @@ describe('OrdersController', () => {
 
   it('delegates the create-order message to the service', async () => {
     const request = {
+      idempotencyKey: '37dc7ca6-c5b3-4e55-aa46-606fe18d33c4',
       userId: '67f76ed1-bdcc-4286-9e3f-123fb4ab571e',
       items: [
         {

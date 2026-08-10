@@ -14,6 +14,7 @@ function rejectedValue(promise: Promise<unknown>): Promise<unknown> {
 describe('ApiGatewayService', () => {
   const bookId = 'd92eb1d3-6ca5-4ae1-a463-1ce744949e95';
   const userId = '67f76ed1-bdcc-4286-9e3f-123fb4ab571e';
+  const idempotencyKey = '37dc7ca6-c5b3-4e55-aa46-606fe18d33c4';
 
   beforeEach(() => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation();
@@ -121,12 +122,42 @@ describe('ApiGatewayService', () => {
       items: [{ bookId, quantity: 2 }],
     };
 
-    await service.dispatch({ method: 'POST', path: '/api/orders', body });
+    await service.dispatch({
+      method: 'POST',
+      path: '/api/orders',
+      body,
+      headers: { 'idempotency-key': idempotencyKey },
+    });
 
     expect(ordersSend).toHaveBeenCalledWith(
       MESSAGE_PATTERNS.orders.order.create,
-      expect.objectContaining(body),
+      expect.objectContaining({ ...body, idempotencyKey }),
     );
+  });
+
+  it('requires an idempotency key before sending a create-order command', async () => {
+    const ordersSend = jest.fn();
+    const service = new ApiGatewayService(
+      {} as never,
+      {} as never,
+      { send: ordersSend } as never,
+      new GatewayRouteRegistry(),
+    );
+
+    const error = await rejectedValue(
+      service.dispatch({
+        method: 'POST',
+        path: '/api/orders',
+        body: {
+          userId,
+          items: [{ bookId, quantity: 1 }],
+        },
+      }),
+    );
+
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(400);
+    expect(ordersSend).not.toHaveBeenCalled();
   });
 
   it('rejects an unsupported route before any TCP call', async () => {

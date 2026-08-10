@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ClientProxy, RpcException } from '@nestjs/microservices';
+import { createHash } from 'node:crypto';
 import {
   CreateOrderItemRequest,
   CreateOrderRequest,
@@ -9,6 +10,7 @@ import {
   OrderResponse,
 } from '@app/common';
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
+import { QueryFailedError } from 'typeorm';
 import { Book } from '../../../../books-service/src/books/entities/book.entity';
 import { OrderItem } from '../entities/order-item.entity';
 import { Order } from '../entities/order.entity';
@@ -32,46 +34,77 @@ export class OrdersService {
   ) {}
 
   async createOrder(request: CreateOrderRequest): Promise<CreateOrderResponse> {
-    await this.ensureUserExists(request.userId);
     const requestedItems = this.mergeDuplicateItems(request.items);
+    const requestHash = this.createRequestHash(request.userId, requestedItems);
+    const existingOrder = await this.ordersRepository.findByIdempotencyKey(
+      request.idempotencyKey,
+    );
 
-    return this.ordersRepository.runInTransaction(async (transaction) => {
-      const books = await transaction.findBooksForUpdate(
-        requestedItems.map((item) => item.bookId),
+    if (existingOrder) {
+      return this.replayOrder(existingOrder, requestHash);
+    }
+
+    await this.ensureUserExists(request.userId);
+
+    try {
+      return await this.ordersRepository.runInTransaction(
+        async (transaction) => {
+          const books = await transaction.findBooksForUpdate(
+            requestedItems.map((item) => item.bookId),
+          );
+          const booksById = new Map(books.map((book) => [book.id, book]));
+          const orderItems: NewOrderItemRecord[] = [];
+          let totalCents = 0n;
+
+          for (const requestedItem of requestedItems) {
+            const book = booksById.get(requestedItem.bookId);
+            this.assertBookCanBeOrdered(book, requestedItem);
+
+            const unitPriceCents = this.moneyToCents(book.price);
+            const lineTotalCents =
+              unitPriceCents * BigInt(requestedItem.quantity);
+
+            book.availableQuantity -= requestedItem.quantity;
+            book.soldQuantity += requestedItem.quantity;
+            totalCents += lineTotalCents;
+            orderItems.push({
+              bookId: book.id,
+              bookTitle: book.title,
+              unitPrice: this.formatMoney(unitPriceCents),
+              quantity: requestedItem.quantity,
+              lineTotal: this.formatMoney(lineTotalCents),
+            });
+          }
+
+          await transaction.saveBooks(books);
+          const saved = await transaction.createOrder({
+            userId: request.userId,
+            idempotencyKey: request.idempotencyKey,
+            requestHash,
+            status: OrderStatus.CONFIRMED,
+            totalAmount: this.formatMoney(totalCents),
+            items: orderItems,
+          });
+
+          return this.toOrderResponse(saved.order, saved.items);
+        },
       );
-      const booksById = new Map(books.map((book) => [book.id, book]));
-      const orderItems: NewOrderItemRecord[] = [];
-      let totalCents = 0n;
-
-      for (const requestedItem of requestedItems) {
-        const book = booksById.get(requestedItem.bookId);
-        this.assertBookCanBeOrdered(book, requestedItem);
-
-        const unitPriceCents = this.moneyToCents(book.price);
-        const lineTotalCents = unitPriceCents * BigInt(requestedItem.quantity);
-
-        book.availableQuantity -= requestedItem.quantity;
-        book.soldQuantity += requestedItem.quantity;
-        totalCents += lineTotalCents;
-        orderItems.push({
-          bookId: book.id,
-          bookTitle: book.title,
-          unitPrice: this.formatMoney(unitPriceCents),
-          quantity: requestedItem.quantity,
-          lineTotal: this.formatMoney(lineTotalCents),
-        });
+    } catch (error: unknown) {
+      if (!this.isIdempotencyKeyConflict(error)) {
+        throw error;
       }
 
-      await transaction.saveBooks(books);
-      const saved = await transaction.createOrder({
-        userId: request.userId,
-        status: OrderStatus.CONFIRMED,
-        totalAmount: this.formatMoney(totalCents),
-        items: orderItems,
-      });
+      const concurrentlyCreatedOrder =
+        await this.ordersRepository.findByIdempotencyKey(
+          request.idempotencyKey,
+        );
 
-      return this.toOrderResponse(saved.order, saved.items);
-    });
+      if (!concurrentlyCreatedOrder) {
+        throw error;
+      }
+
+      return this.replayOrder(concurrentlyCreatedOrder, requestHash);
+    }
   }
 
   async getOrder(id: string): Promise<OrderResponse> {
@@ -142,7 +175,45 @@ export class OrdersService {
     return Array.from(quantitiesByBookId, ([bookId, quantity]) => ({
       bookId,
       quantity,
-    }));
+    })).sort((left, right) => left.bookId.localeCompare(right.bookId));
+  }
+
+  private createRequestHash(
+    userId: string,
+    items: CreateOrderItemRequest[],
+  ): string {
+    return createHash('sha256')
+      .update(JSON.stringify({ userId, items }))
+      .digest('hex');
+  }
+
+  private replayOrder(order: Order, requestHash: string): CreateOrderResponse {
+    if (order.requestHash !== requestHash) {
+      throw new RpcException({
+        statusCode: 409,
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message:
+          'The idempotency key was already used for a different order request.',
+      });
+    }
+
+    return this.toOrderResponse(order, order.items);
+  }
+
+  private isIdempotencyKeyConflict(error: unknown): boolean {
+    if (!(error instanceof QueryFailedError)) {
+      return false;
+    }
+
+    const driverError = error.driverError as {
+      code?: string;
+      constraint?: string;
+    };
+
+    return (
+      driverError.code === '23505' &&
+      driverError.constraint === 'UQ_orders_idempotency_key'
+    );
   }
 
   private assertBookCanBeOrdered(

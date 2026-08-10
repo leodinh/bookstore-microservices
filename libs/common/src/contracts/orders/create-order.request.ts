@@ -19,6 +19,9 @@ export class CreateOrderItemRequest {
 
 export class CreateOrderRequest {
   @IsUUID()
+  idempotencyKey!: string;
+
+  @IsUUID()
   userId!: string;
 
   @IsArray()

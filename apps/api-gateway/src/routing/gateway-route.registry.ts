@@ -17,6 +17,7 @@ export interface GatewayRouteContext {
   params: Record<string, string>;
   body: unknown;
   query: Record<string, unknown>;
+  headers: Record<string, string | undefined>;
 }
 
 export interface ResolvedGatewayRoute {
@@ -103,7 +104,10 @@ export class GatewayRouteRegistry {
       clientName: 'ORDERS_SERVICE',
       pattern: MESSAGE_PATTERNS.orders.order.create,
       requestType: CreateOrderRequest,
-      buildPayload: ({ body }) => bodyAsRecord(body),
+      buildPayload: ({ body, headers }) => ({
+        ...bodyAsRecord(body),
+        idempotencyKey: headers['idempotency-key'],
+      }),
     },
     {
       method: 'GET',

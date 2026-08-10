@@ -5,6 +5,7 @@ describe('GatewayRouteRegistry', () => {
   const bookId = 'd92eb1d3-6ca5-4ae1-a463-1ce744949e95';
   const userId = '67f76ed1-bdcc-4286-9e3f-123fb4ab571e';
   const orderId = '90a303ef-b364-4467-ad1a-684957197563';
+  const idempotencyKey = '37dc7ca6-c5b3-4e55-aa46-606fe18d33c4';
 
   it.each([
     [
@@ -72,6 +73,20 @@ describe('GatewayRouteRegistry', () => {
     );
 
     expect(route?.params).toEqual({ userId });
+  });
+
+  it('maps the HTTP idempotency header into the create-order payload', () => {
+    const route = new GatewayRouteRegistry().resolve('POST', '/api/orders');
+    const body = { userId, items: [{ bookId, quantity: 1 }] };
+
+    expect(
+      route?.buildPayload({
+        params: {},
+        body,
+        query: {},
+        headers: { 'idempotency-key': idempotencyKey },
+      }),
+    ).toEqual({ ...body, idempotencyKey });
   });
 
   it('does not resolve unregistered methods or paths', () => {

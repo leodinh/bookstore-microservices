@@ -15,6 +15,8 @@ export interface NewOrderItemRecord {
 
 export interface NewOrderRecord {
   userId: string;
+  idempotencyKey: string;
+  requestHash: string;
   status: OrderStatus;
   totalAmount: string;
   items: NewOrderItemRecord[];
@@ -47,6 +49,13 @@ export class OrdersRepository {
       where: { userId },
       relations: { items: true },
       order: { createdAt: 'DESC' },
+    });
+  }
+
+  findByIdempotencyKey(idempotencyKey: string): Promise<Order | null> {
+    return this.dataSource.getRepository(Order).findOne({
+      where: { idempotencyKey },
+      relations: { items: true },
     });
   }
 
@@ -83,6 +92,8 @@ export class OrdersRepository {
         const order = await ordersRepository.save(
           ordersRepository.create({
             userId: input.userId,
+            idempotencyKey: input.idempotencyKey,
+            requestHash: input.requestHash,
             status: input.status,
             totalAmount: input.totalAmount,
           }),

@@ -34,6 +34,21 @@ describe('OrdersRepository', () => {
     });
   });
 
+  it('loads an order by idempotency key with its item snapshots', async () => {
+    const findOne = jest.fn().mockResolvedValue(null);
+    const dataSource = {
+      getRepository: jest.fn().mockReturnValue({ findOne }),
+    };
+    const repository = new OrdersRepository(dataSource as never);
+
+    await repository.findByIdempotencyKey('request-key');
+
+    expect(findOne).toHaveBeenCalledWith({
+      where: { idempotencyKey: 'request-key' },
+      relations: { items: true },
+    });
+  });
+
   it('uses a write lock and saves the order inside one transaction', async () => {
     const book = { id: 'book-id' } as Book;
     const queryBuilder = {
@@ -76,6 +91,8 @@ describe('OrdersRepository', () => {
     const repository = new OrdersRepository(dataSource as never);
     const input = {
       userId: 'user-id',
+      idempotencyKey: 'request-key',
+      requestHash: 'a'.repeat(64),
       status: OrderStatus.CONFIRMED,
       totalAmount: '19.99',
       items: [
@@ -105,6 +122,8 @@ describe('OrdersRepository', () => {
     expect(booksRepository.save).toHaveBeenCalledWith([book]);
     expect(ordersRepository.create).toHaveBeenCalledWith({
       userId: input.userId,
+      idempotencyKey: input.idempotencyKey,
+      requestHash: input.requestHash,
       status: input.status,
       totalAmount: input.totalAmount,
     });

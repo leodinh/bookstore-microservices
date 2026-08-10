@@ -15,6 +15,7 @@ describe('ApiGatewayController', () => {
       method: 'POST',
       path: '/api/books',
       query: { source: 'test' },
+      get: jest.fn().mockReturnValue('request-key'),
     } as unknown as Request;
     const body = { title: 'A Book' };
 
@@ -24,6 +25,7 @@ describe('ApiGatewayController', () => {
       path: '/api/books',
       body,
       query: { source: 'test' },
+      headers: { 'idempotency-key': 'request-key' },
     });
   });
 });

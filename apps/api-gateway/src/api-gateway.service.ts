@@ -38,6 +38,7 @@ export interface GatewayDispatchRequest {
   path: string;
   body?: unknown;
   query?: Record<string, unknown>;
+  headers?: Record<string, string | undefined>;
 }
 
 @Injectable()
@@ -73,6 +74,7 @@ export class ApiGatewayService {
       params: route.params,
       body: request.body,
       query: request.query ?? {},
+      headers: request.headers ?? {},
     });
     const payload = route.requestType
       ? ((await this.routeValidationPipe.transform(rawPayload, {
