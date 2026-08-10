@@ -6,7 +6,11 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
-import { MESSAGE_PATTERNS, SignupUserRequest } from '@app/common';
+import {
+  CreateOrderRequest,
+  MESSAGE_PATTERNS,
+  SignupUserRequest,
+} from '@app/common';
 import {
   catchError,
   firstValueFrom,
@@ -26,6 +30,7 @@ export class ApiGatewayService {
   constructor(
     @Inject('BOOKS_SERVICE') private readonly booksClient: ClientProxy,
     @Inject('USERS_SERVICE') private readonly usersClient: ClientProxy,
+    @Inject('ORDERS_SERVICE') private readonly ordersClient: ClientProxy,
   ) {}
 
   getBookCatalog() {
@@ -40,6 +45,14 @@ export class ApiGatewayService {
     return this.send(
       this.usersClient,
       MESSAGE_PATTERNS.users.account.signup,
+      request,
+    );
+  }
+
+  createOrder(request: CreateOrderRequest) {
+    return this.send(
+      this.ordersClient,
+      MESSAGE_PATTERNS.orders.order.create,
       request,
     );
   }

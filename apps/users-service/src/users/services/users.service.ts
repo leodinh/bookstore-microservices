@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
-import { SignupUserRequest, SignupUserResponse } from '@app/common';
+import {
+  GetUserResponse,
+  SignupUserRequest,
+  SignupUserResponse,
+} from '@app/common';
 import { UsersRepository } from '../repositories/users.repository';
 import { PasswordHasher } from './password-hasher.service';
 
@@ -10,6 +14,25 @@ export class UsersService {
     private readonly usersRepository: UsersRepository,
     private readonly passwordHasher: PasswordHasher,
   ) {}
+
+  async getUser(id: string): Promise<GetUserResponse> {
+    const user = await this.usersRepository.findById(id);
+
+    if (!user) {
+      throw new RpcException({
+        statusCode: 404,
+        code: 'USER_NOT_FOUND',
+        message: 'The requested user was not found.',
+      });
+    }
+
+    return {
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+    };
+  }
 
   async signup(request: SignupUserRequest): Promise<SignupUserResponse> {
     const email = request.email.trim().toLowerCase();

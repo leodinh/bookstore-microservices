@@ -6,7 +6,7 @@ import {
   ParseUUIDPipe,
   Post,
 } from '@nestjs/common';
-import { SignupUserRequest } from '@app/common';
+import { CreateOrderRequest, SignupUserRequest } from '@app/common';
 import { ApiGatewayService } from './api-gateway.service';
 
 @Controller()
@@ -26,5 +26,10 @@ export class ApiGatewayController {
   @Post('api/users/signup')
   signup(@Body() request: SignupUserRequest) {
     return this.apiGatewayService.signup(request);
+  }
+
+  @Post('api/orders')
+  createOrder(@Body() request: CreateOrderRequest) {
+    return this.apiGatewayService.createOrder(request);
   }
 }

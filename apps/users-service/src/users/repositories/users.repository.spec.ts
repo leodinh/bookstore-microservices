@@ -1,6 +1,19 @@
 import { UsersRepository } from './users.repository';
 
 describe('UsersRepository', () => {
+  it('finds a user by id', async () => {
+    const typeOrmRepository = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+    const repository = new UsersRepository(typeOrmRepository as never);
+
+    await repository.findById('user-id');
+
+    expect(typeOrmRepository.findOne).toHaveBeenCalledWith({
+      where: { id: 'user-id' },
+    });
+  });
+
   it('finds a user by email', async () => {
     const typeOrmRepository = {
       findOne: jest.fn().mockResolvedValue(null),

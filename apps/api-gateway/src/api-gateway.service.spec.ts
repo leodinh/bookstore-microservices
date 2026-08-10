@@ -13,7 +13,11 @@ function rejectedValue(promise: Promise<unknown>): Promise<unknown> {
 describe('ApiGatewayService', () => {
   it('uses the controlled catalog message pattern', async () => {
     const send = jest.fn().mockReturnValue(of([{ id: 1 }]));
-    const service = new ApiGatewayService({ send } as never, {} as never);
+    const service = new ApiGatewayService(
+      { send } as never,
+      {} as never,
+      {} as never,
+    );
 
     await expect(service.getBookCatalog()).resolves.toEqual([{ id: 1 }]);
     expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.books.catalog.get, {});
@@ -21,7 +25,11 @@ describe('ApiGatewayService', () => {
 
   it('sends a get-book request using the controlled pattern', async () => {
     const send = jest.fn().mockReturnValue(of({ id: 'book-id' }));
-    const service = new ApiGatewayService({ send } as never, {} as never);
+    const service = new ApiGatewayService(
+      { send } as never,
+      {} as never,
+      {} as never,
+    );
 
     await service.getBook('book-id');
 
@@ -38,7 +46,11 @@ describe('ApiGatewayService', () => {
         message: 'The requested book was not found.',
       })),
     );
-    const service = new ApiGatewayService({ send } as never, {} as never);
+    const service = new ApiGatewayService(
+      { send } as never,
+      {} as never,
+      {} as never,
+    );
 
     const error = await rejectedValue(service.getBook('missing'));
 
@@ -48,7 +60,11 @@ describe('ApiGatewayService', () => {
 
   it('sends signup through the Users client', async () => {
     const send = jest.fn().mockReturnValue(of({ id: 'user-id' }));
-    const service = new ApiGatewayService({} as never, { send } as never);
+    const service = new ApiGatewayService(
+      {} as never,
+      { send } as never,
+      {} as never,
+    );
     const request = {
       firstName: 'Sam',
       lastName: 'Taylor',
@@ -60,6 +76,31 @@ describe('ApiGatewayService', () => {
 
     expect(send).toHaveBeenCalledWith(
       MESSAGE_PATTERNS.users.account.signup,
+      request,
+    );
+  });
+
+  it('sends create-order through the Orders client', async () => {
+    const send = jest.fn().mockReturnValue(of({ id: 'order-id' }));
+    const service = new ApiGatewayService(
+      {} as never,
+      {} as never,
+      { send } as never,
+    );
+    const request = {
+      userId: '67f76ed1-bdcc-4286-9e3f-123fb4ab571e',
+      items: [
+        {
+          bookId: 'd92eb1d3-6ca5-4ae1-a463-1ce744949e95',
+          quantity: 2,
+        },
+      ],
+    };
+
+    await service.createOrder(request);
+
+    expect(send).toHaveBeenCalledWith(
+      MESSAGE_PATTERNS.orders.order.create,
       request,
     );
   });

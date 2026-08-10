@@ -18,6 +18,49 @@ describe('UsersService', () => {
     password: 'SecurePassword123!',
   };
 
+  it('returns the public user fields by id', async () => {
+    const user = {
+      id: '67f76ed1-bdcc-4286-9e3f-123fb4ab571e',
+      firstName: 'Sam',
+      lastName: 'Taylor',
+      email: 'sam@example.com',
+      passwordHash: 'hashed-password',
+      createdAt: new Date('2026-08-10T12:00:00.000Z'),
+      updatedAt: new Date('2026-08-10T12:00:00.000Z'),
+    } satisfies User;
+    const usersRepository = {
+      findById: jest.fn().mockResolvedValue(user),
+    };
+    const service = new UsersService(
+      usersRepository as unknown as UsersRepository,
+      { hash: jest.fn() },
+    );
+
+    await expect(service.getUser(user.id)).resolves.toEqual({
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+    });
+  });
+
+  it('rejects an unknown user id', async () => {
+    const usersRepository = {
+      findById: jest.fn().mockResolvedValue(null),
+    };
+    const service = new UsersService(
+      usersRepository as unknown as UsersRepository,
+      { hash: jest.fn() },
+    );
+
+    const error = await rejectedValue(service.getUser('missing-user'));
+
+    expect(error).toBeInstanceOf(RpcException);
+    expect((error as RpcException).getError()).toEqual(
+      expect.objectContaining({ code: 'USER_NOT_FOUND' }),
+    );
+  });
+
   it('normalizes input, hashes the password, and omits the hash', async () => {
     const createdAt = new Date('2026-08-10T12:00:00.000Z');
     const user = {
