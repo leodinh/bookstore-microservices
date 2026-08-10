@@ -14,6 +14,14 @@ import { ApiGatewayService } from './api-gateway.service';
           port: Number(process.env.BOOKS_SERVICE_PORT ?? 4002),
         },
       },
+      {
+        name: 'USERS_SERVICE',
+        transport: Transport.TCP,
+        options: {
+          host: process.env.USERS_SERVICE_HOST ?? '127.0.0.1',
+          port: Number(process.env.USERS_SERVICE_PORT ?? 4001),
+        },
+      },
     ]),
   ],
   controllers: [ApiGatewayController],

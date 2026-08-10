@@ -13,7 +13,7 @@ function rejectedValue(promise: Promise<unknown>): Promise<unknown> {
 describe('ApiGatewayService', () => {
   it('uses the controlled catalog message pattern', async () => {
     const send = jest.fn().mockReturnValue(of([{ id: 1 }]));
-    const service = new ApiGatewayService({ send } as never);
+    const service = new ApiGatewayService({ send } as never, {} as never);
 
     await expect(service.getBookCatalog()).resolves.toEqual([{ id: 1 }]);
     expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.books.catalog.get, {});
@@ -21,7 +21,7 @@ describe('ApiGatewayService', () => {
 
   it('sends a get-book request using the controlled pattern', async () => {
     const send = jest.fn().mockReturnValue(of({ id: 'book-id' }));
-    const service = new ApiGatewayService({ send } as never);
+    const service = new ApiGatewayService({ send } as never, {} as never);
 
     await service.getBook('book-id');
 
@@ -38,11 +38,29 @@ describe('ApiGatewayService', () => {
         message: 'The requested book was not found.',
       })),
     );
-    const service = new ApiGatewayService({ send } as never);
+    const service = new ApiGatewayService({ send } as never, {} as never);
 
     const error = await rejectedValue(service.getBook('missing'));
 
     expect(error).toBeInstanceOf(HttpException);
     expect((error as HttpException).getStatus()).toBe(404);
+  });
+
+  it('sends signup through the Users client', async () => {
+    const send = jest.fn().mockReturnValue(of({ id: 'user-id' }));
+    const service = new ApiGatewayService({} as never, { send } as never);
+    const request = {
+      firstName: 'Sam',
+      lastName: 'Taylor',
+      email: 'sam@example.com',
+      password: 'SecurePassword123!',
+    };
+
+    await service.signup(request);
+
+    expect(send).toHaveBeenCalledWith(
+      MESSAGE_PATTERNS.users.account.signup,
+      request,
+    );
   });
 });

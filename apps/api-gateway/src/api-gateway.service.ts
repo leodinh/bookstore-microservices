@@ -6,7 +6,7 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
-import { MESSAGE_PATTERNS } from '@app/common';
+import { MESSAGE_PATTERNS, SignupUserRequest } from '@app/common';
 import {
   catchError,
   firstValueFrom,
@@ -25,20 +25,29 @@ interface RpcErrorPayload {
 export class ApiGatewayService {
   constructor(
     @Inject('BOOKS_SERVICE') private readonly booksClient: ClientProxy,
+    @Inject('USERS_SERVICE') private readonly usersClient: ClientProxy,
   ) {}
 
   getBookCatalog() {
-    return this.sendToBooks(MESSAGE_PATTERNS.books.catalog.get, {});
+    return this.send(this.booksClient, MESSAGE_PATTERNS.books.catalog.get, {});
   }
 
   getBook(id: string) {
-    return this.sendToBooks(MESSAGE_PATTERNS.books.book.get, { id });
+    return this.send(this.booksClient, MESSAGE_PATTERNS.books.book.get, { id });
   }
 
-  private sendToBooks(pattern: object, payload: object) {
+  signup(request: SignupUserRequest) {
+    return this.send(
+      this.usersClient,
+      MESSAGE_PATTERNS.users.account.signup,
+      request,
+    );
+  }
+
+  private send(client: ClientProxy, pattern: object, payload: object) {
     const timeoutMs = Number(process.env.MICROSERVICE_TIMEOUT_MS ?? 5000);
     return firstValueFrom(
-      this.booksClient.send(pattern, payload).pipe(
+      client.send(pattern, payload).pipe(
         timeout(timeoutMs),
         catchError((error: unknown) =>
           throwError(() => this.toHttpException(error)),
@@ -52,7 +61,7 @@ export class ApiGatewayService {
       return new GatewayTimeoutException({
         statusCode: 504,
         code: 'MICROSERVICE_TIMEOUT',
-        message: 'The Books service did not respond in time.',
+        message: 'The target microservice did not respond in time.',
       });
     }
 
