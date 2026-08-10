@@ -1,6 +1,6 @@
-import { HttpException } from '@nestjs/common';
+import { HttpException, Logger } from '@nestjs/common';
 import { MESSAGE_PATTERNS } from '@app/common';
-import { of, throwError } from 'rxjs';
+import { NEVER, of, throwError } from 'rxjs';
 import { ApiGatewayService } from './api-gateway.service';
 import { GatewayRouteRegistry } from './routing/gateway-route.registry';
 
@@ -14,6 +14,14 @@ function rejectedValue(promise: Promise<unknown>): Promise<unknown> {
 describe('ApiGatewayService', () => {
   const bookId = 'd92eb1d3-6ca5-4ae1-a463-1ce744949e95';
   const userId = '67f76ed1-bdcc-4286-9e3f-123fb4ab571e';
+
+  beforeEach(() => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
   it('dispatches a registered catalog route to Books', async () => {
     const booksSend = jest.fn().mockReturnValue(of([{ id: bookId }]));
@@ -184,5 +192,77 @@ describe('ApiGatewayService', () => {
 
     expect(error).toBeInstanceOf(HttpException);
     expect((error as HttpException).getStatus()).toBe(404);
+  });
+
+  it('translates a refused TCP connection into service unavailable', async () => {
+    const connectionError = Object.assign(new Error('Connection refused'), {
+      code: 'ECONNREFUSED',
+    });
+    const booksSend = jest
+      .fn()
+      .mockReturnValue(throwError(() => connectionError));
+    const service = new ApiGatewayService(
+      { send: booksSend } as never,
+      {} as never,
+      {} as never,
+      new GatewayRouteRegistry(),
+    );
+
+    const error = await rejectedValue(
+      service.dispatch({ method: 'GET', path: '/api/books/catalog' }),
+    );
+
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(503);
+    expect((error as HttpException).getResponse()).toEqual(
+      expect.objectContaining({ code: 'MICROSERVICE_UNAVAILABLE' }),
+    );
+  });
+
+  it('translates a slow microservice response into gateway timeout', async () => {
+    const booksSend = jest.fn().mockReturnValue(NEVER);
+    const service = new ApiGatewayService(
+      { send: booksSend } as never,
+      {} as never,
+      {} as never,
+      new GatewayRouteRegistry(),
+      {
+        microserviceTimeoutMs: 1,
+        throttleTtlMs: 60_000,
+        throttleLimit: 100,
+      },
+    );
+
+    const error = await rejectedValue(
+      service.dispatch({ method: 'GET', path: '/api/books/catalog' }),
+    );
+
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(504);
+    expect((error as HttpException).getResponse()).toEqual(
+      expect.objectContaining({ code: 'MICROSERVICE_TIMEOUT' }),
+    );
+  });
+
+  it('does not disguise an unexpected programming error as an outage', async () => {
+    const booksSend = jest
+      .fn()
+      .mockReturnValue(throwError(() => new TypeError('Unexpected failure')));
+    const service = new ApiGatewayService(
+      { send: booksSend } as never,
+      {} as never,
+      {} as never,
+      new GatewayRouteRegistry(),
+    );
+
+    const error = await rejectedValue(
+      service.dispatch({ method: 'GET', path: '/api/books/catalog' }),
+    );
+
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(500);
+    expect((error as HttpException).getResponse()).toEqual(
+      expect.objectContaining({ code: 'INTERNAL_ERROR' }),
+    );
   });
 });

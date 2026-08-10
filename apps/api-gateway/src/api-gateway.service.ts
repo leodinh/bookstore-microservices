@@ -4,7 +4,9 @@ import {
   Inject,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
+  ServiceUnavailableException,
   ValidationPipe,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
@@ -15,6 +17,11 @@ import {
   timeout,
   TimeoutError,
 } from 'rxjs';
+import {
+  createGatewayResilienceConfig,
+  GATEWAY_RESILIENCE_CONFIG,
+} from './config/gateway-resilience.config';
+import type { GatewayResilienceConfig } from './config/gateway-resilience.config';
 import {
   GatewayClientName,
   GatewayRouteRegistry,
@@ -35,6 +42,7 @@ export interface GatewayDispatchRequest {
 
 @Injectable()
 export class ApiGatewayService {
+  private readonly logger = new Logger(ApiGatewayService.name);
   private readonly routeValidationPipe = new ValidationPipe({
     transform: true,
     whitelist: true,
@@ -46,6 +54,8 @@ export class ApiGatewayService {
     @Inject('USERS_SERVICE') private readonly usersClient: ClientProxy,
     @Inject('ORDERS_SERVICE') private readonly ordersClient: ClientProxy,
     private readonly routeRegistry: GatewayRouteRegistry,
+    @Inject(GATEWAY_RESILIENCE_CONFIG)
+    private readonly resilienceConfig: GatewayResilienceConfig = createGatewayResilienceConfig(),
   ) {}
 
   async dispatch(request: GatewayDispatchRequest): Promise<unknown> {
@@ -86,23 +96,36 @@ export class ApiGatewayService {
   }
 
   private send(client: ClientProxy, pattern: object, payload: object) {
-    const timeoutMs = Number(process.env.MICROSERVICE_TIMEOUT_MS ?? 5000);
     return firstValueFrom(
       client.send(pattern, payload).pipe(
-        timeout(timeoutMs),
+        timeout(this.resilienceConfig.microserviceTimeoutMs),
         catchError((error: unknown) =>
-          throwError(() => this.toHttpException(error)),
+          throwError(() => this.toHttpException(error, pattern)),
         ),
       ),
     );
   }
 
-  private toHttpException(error: unknown): HttpException {
+  private toHttpException(error: unknown, pattern: object): HttpException {
     if (error instanceof TimeoutError) {
+      this.logger.warn(
+        `Microservice request timed out for pattern ${JSON.stringify(pattern)}`,
+      );
       return new GatewayTimeoutException({
         statusCode: 504,
         code: 'MICROSERVICE_TIMEOUT',
         message: 'The target microservice did not respond in time.',
+      });
+    }
+
+    if (this.isTransportUnavailableError(error)) {
+      this.logger.warn(
+        `Microservice unavailable for pattern ${JSON.stringify(pattern)}`,
+      );
+      return new ServiceUnavailableException({
+        statusCode: 503,
+        code: 'MICROSERVICE_UNAVAILABLE',
+        message: 'The target microservice is unavailable.',
       });
     }
 
@@ -115,6 +138,30 @@ export class ApiGatewayService {
       code: 'INTERNAL_ERROR',
       message: 'An unexpected error occurred.',
     });
+  }
+
+  private isTransportUnavailableError(error: unknown): boolean {
+    if (typeof error !== 'object' || error === null) {
+      return false;
+    }
+
+    const candidate = error as { code?: unknown; cause?: unknown };
+    const unavailableCodes = new Set([
+      'ECONNREFUSED',
+      'ECONNRESET',
+      'EHOSTUNREACH',
+      'ENETUNREACH',
+      'ENOTFOUND',
+      'EPIPE',
+      'ETIMEDOUT',
+    ]);
+
+    return (
+      (typeof candidate.code === 'string' &&
+        unavailableCodes.has(candidate.code)) ||
+      (candidate.cause !== undefined &&
+        this.isTransportUnavailableError(candidate.cause))
+    );
   }
 
   private isRpcError(error: unknown): error is RpcErrorPayload {

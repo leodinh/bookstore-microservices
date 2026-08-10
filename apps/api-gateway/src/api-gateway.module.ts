@@ -1,11 +1,28 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { ApiGatewayController } from './api-gateway.controller';
 import { ApiGatewayService } from './api-gateway.service';
+import {
+  createGatewayResilienceConfig,
+  GATEWAY_RESILIENCE_CONFIG,
+} from './config/gateway-resilience.config';
+import { GatewayThrottlerGuard } from './guards/gateway-throttler.guard';
 import { GatewayRouteRegistry } from './routing/gateway-route.registry';
+
+const resilienceConfig = createGatewayResilienceConfig();
 
 @Module({
   imports: [
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          ttl: resilienceConfig.throttleTtlMs,
+          limit: resilienceConfig.throttleLimit,
+        },
+      ],
+    }),
     ClientsModule.register([
       {
         name: 'BOOKS_SERVICE',
@@ -34,6 +51,17 @@ import { GatewayRouteRegistry } from './routing/gateway-route.registry';
     ]),
   ],
   controllers: [ApiGatewayController],
-  providers: [ApiGatewayService, GatewayRouteRegistry],
+  providers: [
+    ApiGatewayService,
+    GatewayRouteRegistry,
+    {
+      provide: GATEWAY_RESILIENCE_CONFIG,
+      useValue: resilienceConfig,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: GatewayThrottlerGuard,
+    },
+  ],
 })
 export class ApiGatewayModule {}
