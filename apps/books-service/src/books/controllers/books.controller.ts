@@ -1,6 +1,6 @@
 import { Controller } from '@nestjs/common';
-import { MessagePattern } from '@nestjs/microservices';
-import { MESSAGE_PATTERNS } from '@app/common';
+import { MessagePattern, Payload } from '@nestjs/microservices';
+import { GetBookRequest, MESSAGE_PATTERNS } from '@app/common';
 import { BooksService } from '../services/books.service';
 
 @Controller()
@@ -10,5 +10,10 @@ export class BooksController {
   @MessagePattern(MESSAGE_PATTERNS.books.catalog.get)
   getCatalog() {
     return this.booksService.getCatalog();
+  }
+
+  @MessagePattern(MESSAGE_PATTERNS.books.book.get)
+  getBook(@Payload() request: GetBookRequest) {
+    return this.booksService.getBook(request.id);
   }
 }

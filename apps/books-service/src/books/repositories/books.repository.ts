@@ -16,4 +16,10 @@ export class BooksRepository {
       order: { title: 'ASC' },
     });
   }
+
+  findActiveById(id: string): Promise<Book | null> {
+    return this.repository.findOne({
+      where: { id, isActive: true },
+    });
+  }
 }

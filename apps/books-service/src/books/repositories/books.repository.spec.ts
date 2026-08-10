@@ -14,4 +14,17 @@ describe('BooksRepository', () => {
       order: { title: 'ASC' },
     });
   });
+
+  it('finds an active book by ID', async () => {
+    const typeOrmRepository = {
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+    const repository = new BooksRepository(typeOrmRepository as never);
+
+    await repository.findActiveById('book-id');
+
+    expect(typeOrmRepository.findOne).toHaveBeenCalledWith({
+      where: { id: 'book-id', isActive: true },
+    });
+  });
 });
