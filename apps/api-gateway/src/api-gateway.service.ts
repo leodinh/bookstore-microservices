@@ -57,6 +57,18 @@ export class ApiGatewayService {
     );
   }
 
+  getOrder(id: string) {
+    return this.send(this.ordersClient, MESSAGE_PATTERNS.orders.order.get, {
+      id,
+    });
+  }
+
+  listUserOrders(userId: string) {
+    return this.send(this.ordersClient, MESSAGE_PATTERNS.orders.user.list, {
+      userId,
+    });
+  }
+
   private send(client: ClientProxy, pattern: object, payload: object) {
     const timeoutMs = Number(process.env.MICROSERVICE_TIMEOUT_MS ?? 5000);
     return firstValueFrom(

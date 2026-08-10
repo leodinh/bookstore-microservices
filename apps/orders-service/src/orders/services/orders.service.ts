@@ -6,9 +6,12 @@ import {
   CreateOrderResponse,
   GetUserResponse,
   MESSAGE_PATTERNS,
+  OrderResponse,
 } from '@app/common';
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
 import { Book } from '../../../../books-service/src/books/entities/book.entity';
+import { OrderItem } from '../entities/order-item.entity';
+import { Order } from '../entities/order.entity';
 import { OrderStatus } from '../enums/order-status.enum';
 import {
   NewOrderItemRecord,
@@ -67,21 +70,29 @@ export class OrdersService {
         items: orderItems,
       });
 
-      return {
-        id: saved.order.id,
-        userId: saved.order.userId,
-        status: saved.order.status,
-        totalAmount: saved.order.totalAmount,
-        items: saved.items.map((item) => ({
-          bookId: item.bookId,
-          bookTitle: item.bookTitle,
-          unitPrice: item.unitPrice,
-          quantity: item.quantity,
-          lineTotal: item.lineTotal,
-        })),
-        createdAt: saved.order.createdAt.toISOString(),
-      };
+      return this.toOrderResponse(saved.order, saved.items);
     });
+  }
+
+  async getOrder(id: string): Promise<OrderResponse> {
+    const order = await this.ordersRepository.findById(id);
+
+    if (!order) {
+      throw new RpcException({
+        statusCode: 404,
+        code: 'ORDER_NOT_FOUND',
+        message: 'The requested order was not found.',
+      });
+    }
+
+    return this.toOrderResponse(order, order.items);
+  }
+
+  async listUserOrders(userId: string): Promise<OrderResponse[]> {
+    await this.ensureUserExists(userId);
+    const orders = await this.ordersRepository.findByUserId(userId);
+
+    return orders.map((order) => this.toOrderResponse(order, order.items));
   }
 
   private async ensureUserExists(userId: string): Promise<void> {
@@ -164,6 +175,23 @@ export class OrdersService {
     const whole = cents / 100n;
     const fraction = (cents % 100n).toString().padStart(2, '0');
     return `${whole}.${fraction}`;
+  }
+
+  private toOrderResponse(order: Order, items: OrderItem[]): OrderResponse {
+    return {
+      id: order.id,
+      userId: order.userId,
+      status: order.status,
+      totalAmount: order.totalAmount,
+      items: items.map((item) => ({
+        bookId: item.bookId,
+        bookTitle: item.bookTitle,
+        unitPrice: item.unitPrice,
+        quantity: item.quantity,
+        lineTotal: item.lineTotal,
+      })),
+      createdAt: order.createdAt.toISOString(),
+    };
   }
 
   private isRpcError(error: unknown): error is RpcErrorPayload {

@@ -22,6 +22,83 @@ describe('OrdersService', () => {
   const userId = '67f76ed1-bdcc-4286-9e3f-123fb4ab571e';
   const bookId = 'd92eb1d3-6ca5-4ae1-a463-1ce744949e95';
 
+  it('returns an order with its item snapshots', async () => {
+    const item = {
+      bookId,
+      bookTitle: 'Historical Title',
+      unitPrice: '19.99',
+      quantity: 2,
+      lineTotal: '39.98',
+    } as OrderItem;
+    const order = {
+      id: 'order-id',
+      userId,
+      status: OrderStatus.CONFIRMED,
+      totalAmount: '39.98',
+      items: [item],
+      createdAt: new Date('2026-08-10T12:00:00.000Z'),
+    } as Order;
+    const ordersRepository = {
+      findById: jest.fn().mockResolvedValue(order),
+    };
+    const service = new OrdersService(
+      {} as never,
+      ordersRepository as unknown as OrdersRepository,
+    );
+
+    await expect(service.getOrder(order.id)).resolves.toEqual({
+      id: order.id,
+      userId,
+      status: OrderStatus.CONFIRMED,
+      totalAmount: '39.98',
+      items: [
+        {
+          bookId,
+          bookTitle: 'Historical Title',
+          unitPrice: '19.99',
+          quantity: 2,
+          lineTotal: '39.98',
+        },
+      ],
+      createdAt: '2026-08-10T12:00:00.000Z',
+    });
+  });
+
+  it('rejects an unknown order id', async () => {
+    const ordersRepository = {
+      findById: jest.fn().mockResolvedValue(null),
+    };
+    const service = new OrdersService(
+      {} as never,
+      ordersRepository as unknown as OrdersRepository,
+    );
+
+    const error = await rejectedValue(service.getOrder('missing-order'));
+
+    expect(error).toBeInstanceOf(RpcException);
+    expect((error as RpcException).getError()).toEqual(
+      expect.objectContaining({ code: 'ORDER_NOT_FOUND' }),
+    );
+  });
+
+  it('validates the user before returning their order history', async () => {
+    const ordersRepository = {
+      findByUserId: jest.fn().mockResolvedValue([]),
+    };
+    const send = jest.fn().mockReturnValue(of({ id: userId }));
+    const service = new OrdersService(
+      { send } as never,
+      ordersRepository as unknown as OrdersRepository,
+    );
+
+    await expect(service.listUserOrders(userId)).resolves.toEqual([]);
+
+    expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.users.account.get, {
+      id: userId,
+    });
+    expect(ordersRepository.findByUserId).toHaveBeenCalledWith(userId);
+  });
+
   it('validates the user, merges duplicate items, and creates an exact total', async () => {
     const book = {
       id: bookId,

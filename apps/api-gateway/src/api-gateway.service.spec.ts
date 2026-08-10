@@ -104,4 +104,34 @@ describe('ApiGatewayService', () => {
       request,
     );
   });
+
+  it('sends get-order through the controlled Orders pattern', async () => {
+    const send = jest.fn().mockReturnValue(of({ id: 'order-id' }));
+    const service = new ApiGatewayService(
+      {} as never,
+      {} as never,
+      { send } as never,
+    );
+
+    await service.getOrder('order-id');
+
+    expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.orders.order.get, {
+      id: 'order-id',
+    });
+  });
+
+  it('sends user-order history through the controlled Orders pattern', async () => {
+    const send = jest.fn().mockReturnValue(of([]));
+    const service = new ApiGatewayService(
+      {} as never,
+      {} as never,
+      { send } as never,
+    );
+
+    await service.listUserOrders('user-id');
+
+    expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.orders.user.list, {
+      userId: 'user-id',
+    });
+  });
 });

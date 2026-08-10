@@ -3,6 +3,37 @@ import { OrderStatus } from '../enums/order-status.enum';
 import { OrdersRepository } from './orders.repository';
 
 describe('OrdersRepository', () => {
+  it('loads one order with its item snapshots', async () => {
+    const findOne = jest.fn().mockResolvedValue(null);
+    const dataSource = {
+      getRepository: jest.fn().mockReturnValue({ findOne }),
+    };
+    const repository = new OrdersRepository(dataSource as never);
+
+    await repository.findById('order-id');
+
+    expect(findOne).toHaveBeenCalledWith({
+      where: { id: 'order-id' },
+      relations: { items: true },
+    });
+  });
+
+  it('loads a user order history newest first', async () => {
+    const find = jest.fn().mockResolvedValue([]);
+    const dataSource = {
+      getRepository: jest.fn().mockReturnValue({ find }),
+    };
+    const repository = new OrdersRepository(dataSource as never);
+
+    await repository.findByUserId('user-id');
+
+    expect(find).toHaveBeenCalledWith({
+      where: { userId: 'user-id' },
+      relations: { items: true },
+      order: { createdAt: 'DESC' },
+    });
+  });
+
   it('uses a write lock and saves the order inside one transaction', async () => {
     const book = { id: 'book-id' } as Book;
     const queryBuilder = {

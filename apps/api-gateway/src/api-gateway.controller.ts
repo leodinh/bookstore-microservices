@@ -32,4 +32,14 @@ export class ApiGatewayController {
   createOrder(@Body() request: CreateOrderRequest) {
     return this.apiGatewayService.createOrder(request);
   }
+
+  @Get('api/orders/user/:userId')
+  listUserOrders(@Param('userId', ParseUUIDPipe) userId: string) {
+    return this.apiGatewayService.listUserOrders(userId);
+  }
+
+  @Get('api/orders/:id')
+  getOrder(@Param('id', ParseUUIDPipe) id: string) {
+    return this.apiGatewayService.getOrder(id);
+  }
 }

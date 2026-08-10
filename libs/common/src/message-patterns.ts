@@ -16,6 +16,10 @@ export const MESSAGE_PATTERNS = {
   orders: {
     order: {
       create: { cmd: 'orders.order.create' },
+      get: { cmd: 'orders.order.get' },
+    },
+    user: {
+      list: { cmd: 'orders.user.list' },
     },
   },
 } as const;

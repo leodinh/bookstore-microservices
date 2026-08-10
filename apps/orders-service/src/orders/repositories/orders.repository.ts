@@ -35,6 +35,21 @@ export interface OrdersTransaction {
 export class OrdersRepository {
   constructor(private readonly dataSource: DataSource) {}
 
+  findById(id: string): Promise<Order | null> {
+    return this.dataSource.getRepository(Order).findOne({
+      where: { id },
+      relations: { items: true },
+    });
+  }
+
+  findByUserId(userId: string): Promise<Order[]> {
+    return this.dataSource.getRepository(Order).find({
+      where: { userId },
+      relations: { items: true },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   runInTransaction<T>(
     operation: (transaction: OrdersTransaction) => Promise<T>,
   ): Promise<T> {
