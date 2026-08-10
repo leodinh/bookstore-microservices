@@ -4,15 +4,10 @@ import {
   Inject,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
+  ValidationPipe,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
-import {
-  CreateBookRequest,
-  CreateOrderRequest,
-  MESSAGE_PATTERNS,
-  SignupUserRequest,
-  UpdateBookBodyRequest,
-} from '@app/common';
 import {
   catchError,
   firstValueFrom,
@@ -20,6 +15,10 @@ import {
   timeout,
   TimeoutError,
 } from 'rxjs';
+import {
+  GatewayClientName,
+  GatewayRouteRegistry,
+} from './routing/gateway-route.registry';
 
 interface RpcErrorPayload {
   statusCode: number;
@@ -27,69 +26,63 @@ interface RpcErrorPayload {
   message: string;
 }
 
+export interface GatewayDispatchRequest {
+  method: string;
+  path: string;
+  body?: unknown;
+  query?: Record<string, unknown>;
+}
+
 @Injectable()
 export class ApiGatewayService {
+  private readonly routeValidationPipe = new ValidationPipe({
+    transform: true,
+    whitelist: true,
+    forbidNonWhitelisted: true,
+  });
+
   constructor(
     @Inject('BOOKS_SERVICE') private readonly booksClient: ClientProxy,
     @Inject('USERS_SERVICE') private readonly usersClient: ClientProxy,
     @Inject('ORDERS_SERVICE') private readonly ordersClient: ClientProxy,
+    private readonly routeRegistry: GatewayRouteRegistry,
   ) {}
 
-  getBookCatalog() {
-    return this.send(this.booksClient, MESSAGE_PATTERNS.books.catalog.get, {});
-  }
+  async dispatch(request: GatewayDispatchRequest): Promise<unknown> {
+    const route = this.routeRegistry.resolve(request.method, request.path);
 
-  getBook(id: string) {
-    return this.send(this.booksClient, MESSAGE_PATTERNS.books.book.get, { id });
-  }
+    if (!route) {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'GATEWAY_ROUTE_NOT_FOUND',
+        message: `No route is registered for ${request.method.toUpperCase()} ${request.path}.`,
+      });
+    }
 
-  createBook(request: CreateBookRequest) {
-    return this.send(
-      this.booksClient,
-      MESSAGE_PATTERNS.books.book.create,
-      request,
-    );
-  }
-
-  updateBook(id: string, request: UpdateBookBodyRequest) {
-    return this.send(this.booksClient, MESSAGE_PATTERNS.books.book.update, {
-      id,
-      ...request,
+    const rawPayload = route.buildPayload({
+      params: route.params,
+      body: request.body,
+      query: request.query ?? {},
     });
+    const payload = route.requestType
+      ? ((await this.routeValidationPipe.transform(rawPayload, {
+          type: 'body',
+          metatype: route.requestType,
+        })) as object)
+      : rawPayload;
+
+    return this.send(this.getClient(route.clientName), route.pattern, payload);
   }
 
-  deactivateBook(id: string) {
-    return this.send(this.booksClient, MESSAGE_PATTERNS.books.book.deactivate, {
-      id,
-    });
-  }
-
-  signup(request: SignupUserRequest) {
-    return this.send(
-      this.usersClient,
-      MESSAGE_PATTERNS.users.account.signup,
-      request,
-    );
-  }
-
-  createOrder(request: CreateOrderRequest) {
-    return this.send(
-      this.ordersClient,
-      MESSAGE_PATTERNS.orders.order.create,
-      request,
-    );
-  }
-
-  getOrder(id: string) {
-    return this.send(this.ordersClient, MESSAGE_PATTERNS.orders.order.get, {
-      id,
-    });
-  }
-
-  listUserOrders(userId: string) {
-    return this.send(this.ordersClient, MESSAGE_PATTERNS.orders.user.list, {
-      userId,
-    });
+  private getClient(clientName: GatewayClientName): ClientProxy {
+    switch (clientName) {
+      case 'BOOKS_SERVICE':
+        return this.booksClient;
+      case 'USERS_SERVICE':
+        return this.usersClient;
+      case 'ORDERS_SERVICE':
+        return this.ordersClient;
+    }
   }
 
   private send(client: ClientProxy, pattern: object, payload: object) {

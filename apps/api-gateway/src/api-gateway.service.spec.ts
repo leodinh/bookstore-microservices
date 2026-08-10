@@ -1,7 +1,8 @@
 import { HttpException } from '@nestjs/common';
-import { of, throwError } from 'rxjs';
 import { MESSAGE_PATTERNS } from '@app/common';
+import { of, throwError } from 'rxjs';
 import { ApiGatewayService } from './api-gateway.service';
+import { GatewayRouteRegistry } from './routing/gateway-route.registry';
 
 function rejectedValue(promise: Promise<unknown>): Promise<unknown> {
   return promise.then(
@@ -11,41 +12,52 @@ function rejectedValue(promise: Promise<unknown>): Promise<unknown> {
 }
 
 describe('ApiGatewayService', () => {
-  it('uses the controlled catalog message pattern', async () => {
-    const send = jest.fn().mockReturnValue(of([{ id: 1 }]));
+  const bookId = 'd92eb1d3-6ca5-4ae1-a463-1ce744949e95';
+  const userId = '67f76ed1-bdcc-4286-9e3f-123fb4ab571e';
+
+  it('dispatches a registered catalog route to Books', async () => {
+    const booksSend = jest.fn().mockReturnValue(of([{ id: bookId }]));
     const service = new ApiGatewayService(
-      { send } as never,
+      { send: booksSend } as never,
       {} as never,
       {} as never,
+      new GatewayRouteRegistry(),
     );
 
-    await expect(service.getBookCatalog()).resolves.toEqual([{ id: 1 }]);
-    expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.books.catalog.get, {});
+    await expect(
+      service.dispatch({ method: 'GET', path: '/api/books/catalog' }),
+    ).resolves.toEqual([{ id: bookId }]);
+    expect(booksSend).toHaveBeenCalledWith(
+      MESSAGE_PATTERNS.books.catalog.get,
+      {},
+    );
   });
 
-  it('sends a get-book request using the controlled pattern', async () => {
-    const send = jest.fn().mockReturnValue(of({ id: 'book-id' }));
+  it('extracts and validates a dynamic book ID before sending', async () => {
+    const booksSend = jest.fn().mockReturnValue(of({ id: bookId }));
     const service = new ApiGatewayService(
-      { send } as never,
+      { send: booksSend } as never,
       {} as never,
       {} as never,
+      new GatewayRouteRegistry(),
     );
 
-    await service.getBook('book-id');
+    await service.dispatch({ method: 'GET', path: `/api/books/${bookId}` });
 
-    expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.books.book.get, {
-      id: 'book-id',
+    expect(booksSend).toHaveBeenCalledWith(MESSAGE_PATTERNS.books.book.get, {
+      id: bookId,
     });
   });
 
-  it('sends create-book through the controlled Books pattern', async () => {
-    const send = jest.fn().mockReturnValue(of({ id: 'book-id' }));
+  it('validates a create-book body and sends it to Books', async () => {
+    const booksSend = jest.fn().mockReturnValue(of({ id: bookId }));
     const service = new ApiGatewayService(
-      { send } as never,
+      { send: booksSend } as never,
       {} as never,
       {} as never,
+      new GatewayRouteRegistry(),
     );
-    const request = {
+    const body = {
       title: 'A Book',
       author: 'An Author',
       isbn: '9780000000032',
@@ -53,47 +65,106 @@ describe('ApiGatewayService', () => {
       availableQuantity: 5,
     };
 
-    await service.createBook(request);
+    await service.dispatch({ method: 'POST', path: '/api/books', body });
 
-    expect(send).toHaveBeenCalledWith(
+    expect(booksSend).toHaveBeenCalledWith(
       MESSAGE_PATTERNS.books.book.create,
-      request,
+      expect.objectContaining(body),
     );
   });
 
-  it('sends update-book with its path id', async () => {
-    const send = jest.fn().mockReturnValue(of({ id: 'book-id' }));
+  it('selects Users for signup', async () => {
+    const usersSend = jest.fn().mockReturnValue(of({ id: userId }));
     const service = new ApiGatewayService(
-      { send } as never,
       {} as never,
+      { send: usersSend } as never,
       {} as never,
+      new GatewayRouteRegistry(),
     );
+    const body = {
+      firstName: 'Sam',
+      lastName: 'Taylor',
+      email: 'sam@example.com',
+      password: 'SecurePassword123!',
+    };
 
-    await service.updateBook('book-id', { price: 24.99 });
-
-    expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.books.book.update, {
-      id: 'book-id',
-      price: 24.99,
+    await service.dispatch({
+      method: 'POST',
+      path: '/api/users/signup',
+      body,
     });
+
+    expect(usersSend).toHaveBeenCalledWith(
+      MESSAGE_PATTERNS.users.account.signup,
+      expect.objectContaining(body),
+    );
   });
 
-  it('maps HTTP deletion to book deactivation', async () => {
-    const send = jest.fn().mockReturnValue(of({ id: 'book-id' }));
+  it('selects Orders and validates nested order items', async () => {
+    const ordersSend = jest.fn().mockReturnValue(of({ id: 'order-id' }));
     const service = new ApiGatewayService(
-      { send } as never,
       {} as never,
       {} as never,
+      { send: ordersSend } as never,
+      new GatewayRouteRegistry(),
+    );
+    const body = {
+      userId,
+      items: [{ bookId, quantity: 2 }],
+    };
+
+    await service.dispatch({ method: 'POST', path: '/api/orders', body });
+
+    expect(ordersSend).toHaveBeenCalledWith(
+      MESSAGE_PATTERNS.orders.order.create,
+      expect.objectContaining(body),
+    );
+  });
+
+  it('rejects an unsupported route before any TCP call', async () => {
+    const booksSend = jest.fn();
+    const usersSend = jest.fn();
+    const ordersSend = jest.fn();
+    const service = new ApiGatewayService(
+      { send: booksSend } as never,
+      { send: usersSend } as never,
+      { send: ordersSend } as never,
+      new GatewayRouteRegistry(),
     );
 
-    await service.deactivateBook('book-id');
+    const error = await rejectedValue(
+      service.dispatch({ method: 'POST', path: '/api/books/catalog' }),
+    );
 
-    expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.books.book.deactivate, {
-      id: 'book-id',
-    });
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getResponse()).toEqual(
+      expect.objectContaining({ code: 'GATEWAY_ROUTE_NOT_FOUND' }),
+    );
+    expect(booksSend).not.toHaveBeenCalled();
+    expect(usersSend).not.toHaveBeenCalled();
+    expect(ordersSend).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid path UUID before TCP', async () => {
+    const booksSend = jest.fn();
+    const service = new ApiGatewayService(
+      { send: booksSend } as never,
+      {} as never,
+      {} as never,
+      new GatewayRouteRegistry(),
+    );
+
+    const error = await rejectedValue(
+      service.dispatch({ method: 'GET', path: '/api/books/not-a-uuid' }),
+    );
+
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(400);
+    expect(booksSend).not.toHaveBeenCalled();
   });
 
   it('translates a structured RPC error into an HTTP exception', async () => {
-    const send = jest.fn().mockReturnValue(
+    const booksSend = jest.fn().mockReturnValue(
       throwError(() => ({
         statusCode: 404,
         code: 'BOOK_NOT_FOUND',
@@ -101,91 +172,17 @@ describe('ApiGatewayService', () => {
       })),
     );
     const service = new ApiGatewayService(
-      { send } as never,
+      { send: booksSend } as never,
       {} as never,
       {} as never,
+      new GatewayRouteRegistry(),
     );
 
-    const error = await rejectedValue(service.getBook('missing'));
+    const error = await rejectedValue(
+      service.dispatch({ method: 'GET', path: `/api/books/${bookId}` }),
+    );
 
     expect(error).toBeInstanceOf(HttpException);
     expect((error as HttpException).getStatus()).toBe(404);
-  });
-
-  it('sends signup through the Users client', async () => {
-    const send = jest.fn().mockReturnValue(of({ id: 'user-id' }));
-    const service = new ApiGatewayService(
-      {} as never,
-      { send } as never,
-      {} as never,
-    );
-    const request = {
-      firstName: 'Sam',
-      lastName: 'Taylor',
-      email: 'sam@example.com',
-      password: 'SecurePassword123!',
-    };
-
-    await service.signup(request);
-
-    expect(send).toHaveBeenCalledWith(
-      MESSAGE_PATTERNS.users.account.signup,
-      request,
-    );
-  });
-
-  it('sends create-order through the Orders client', async () => {
-    const send = jest.fn().mockReturnValue(of({ id: 'order-id' }));
-    const service = new ApiGatewayService(
-      {} as never,
-      {} as never,
-      { send } as never,
-    );
-    const request = {
-      userId: '67f76ed1-bdcc-4286-9e3f-123fb4ab571e',
-      items: [
-        {
-          bookId: 'd92eb1d3-6ca5-4ae1-a463-1ce744949e95',
-          quantity: 2,
-        },
-      ],
-    };
-
-    await service.createOrder(request);
-
-    expect(send).toHaveBeenCalledWith(
-      MESSAGE_PATTERNS.orders.order.create,
-      request,
-    );
-  });
-
-  it('sends get-order through the controlled Orders pattern', async () => {
-    const send = jest.fn().mockReturnValue(of({ id: 'order-id' }));
-    const service = new ApiGatewayService(
-      {} as never,
-      {} as never,
-      { send } as never,
-    );
-
-    await service.getOrder('order-id');
-
-    expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.orders.order.get, {
-      id: 'order-id',
-    });
-  });
-
-  it('sends user-order history through the controlled Orders pattern', async () => {
-    const send = jest.fn().mockReturnValue(of([]));
-    const service = new ApiGatewayService(
-      {} as never,
-      {} as never,
-      { send } as never,
-    );
-
-    await service.listUserOrders('user-id');
-
-    expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.orders.user.list, {
-      userId: 'user-id',
-    });
   });
 });

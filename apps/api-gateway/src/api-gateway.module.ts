@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ApiGatewayController } from './api-gateway.controller';
 import { ApiGatewayService } from './api-gateway.service';
+import { GatewayRouteRegistry } from './routing/gateway-route.registry';
 
 @Module({
   imports: [
@@ -33,6 +34,6 @@ import { ApiGatewayService } from './api-gateway.service';
     ]),
   ],
   controllers: [ApiGatewayController],
-  providers: [ApiGatewayService],
+  providers: [ApiGatewayService, GatewayRouteRegistry],
 })
 export class ApiGatewayModule {}
