@@ -66,7 +66,6 @@ Create an order with a client-generated UUID:
 ```bash
 curl -X POST http://localhost:3000/api/orders \
   -H 'Content-Type: application/json' \
-  -H 'X-Correlation-Id: 5af19211-f08a-4c42-93e3-08cf638b739c' \
   -H 'Idempotency-Key: 4f348ef9-6f07-4df5-8221-e1e4136ea9cc' \
   --data '{
     "userId": "67f76ed1-bdcc-4286-9e3f-123fb4ab571e",
@@ -83,11 +82,11 @@ The Gateway validates the request, sends the controlled `orders.order.create` TC
 
 ## Correlation IDs
 
-The Gateway accepts a UUID in `X-Correlation-Id`. If it is missing or invalid, the Gateway generates one. The selected ID is returned in the response header and added to every TCP request DTO.
+The Gateway generates a new UUID for every HTTP request, overwrites any client-supplied `X-Correlation-Id`, and returns its generated value in the response header. The ID is added to every TCP request DTO.
 
 Orders forwards the same correlation ID when it calls Users. Global RPC interceptors log the ID, message pattern, result, and duration without logging payloads. Searching for one UUID therefore reconstructs a request across separate application logs.
 
-Correlation IDs trace one network attempt. Idempotency keys identify one logical write operation. A retry can have a new correlation ID while keeping the same idempotency key.
+Correlation IDs trace one network attempt. Idempotency keys identify one logical write operation. Every retry receives a new correlation ID while keeping the same idempotency key. If frontend-generated references are needed later, they should use a separate field such as `X-Client-Request-Id`.
 
 ## Resilience behavior
 

@@ -52,8 +52,7 @@ describe('Bookstore microservices (e2e)', () => {
     .padEnd(13, '0')
     .slice(0, 13);
   const idempotencyKey = randomUUID();
-  const orderCorrelationId = randomUUID();
-  const replayCorrelationId = randomUUID();
+  const duplicatedClientCorrelationId = randomUUID();
   let gatewayApp: INestApplication | undefined;
   let usersApp: INestMicroservice | undefined;
   let booksApp: INestMicroservice | undefined;
@@ -189,7 +188,7 @@ describe('Bookstore microservices (e2e)', () => {
     const firstOrderResponse = await request(httpServer)
       .post('/api/orders')
       .set('Idempotency-Key', idempotencyKey)
-      .set('X-Correlation-Id', orderCorrelationId)
+      .set('X-Correlation-Id', duplicatedClientCorrelationId)
       .send(orderRequest)
       .expect(200);
     const firstOrder = responseBody<OrderResponseBody>(firstOrderResponse.body);
@@ -199,17 +198,22 @@ describe('Bookstore microservices (e2e)', () => {
         items: [expect.objectContaining({ bookId, quantity: 2 })],
       }),
     );
-    expect(firstOrderResponse.get('x-correlation-id')).toBe(orderCorrelationId);
+    const firstCorrelationId = firstOrderResponse.get('x-correlation-id');
+    expect(firstCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(firstCorrelationId).not.toBe(duplicatedClientCorrelationId);
 
     const replayResponse = await request(httpServer)
       .post('/api/orders')
       .set('Idempotency-Key', idempotencyKey)
-      .set('X-Correlation-Id', replayCorrelationId)
+      .set('X-Correlation-Id', duplicatedClientCorrelationId)
       .send(orderRequest)
       .expect(200);
     const replayedOrder = responseBody<OrderResponseBody>(replayResponse.body);
     expect(replayedOrder.id).toBe(firstOrder.id);
-    expect(replayResponse.get('x-correlation-id')).toBe(replayCorrelationId);
+    const replayedCorrelationId = replayResponse.get('x-correlation-id');
+    expect(replayedCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(replayedCorrelationId).not.toBe(duplicatedClientCorrelationId);
+    expect(replayedCorrelationId).not.toBe(firstCorrelationId);
 
     const conflictResponse = await request(httpServer)
       .post('/api/orders')
