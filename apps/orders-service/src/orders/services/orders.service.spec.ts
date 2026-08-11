@@ -24,6 +24,7 @@ describe('OrdersService', () => {
   const userId = '67f76ed1-bdcc-4286-9e3f-123fb4ab571e';
   const bookId = 'd92eb1d3-6ca5-4ae1-a463-1ce744949e95';
   const idempotencyKey = '37dc7ca6-c5b3-4e55-aa46-606fe18d33c4';
+  const correlationId = '5af19211-f08a-4c42-93e3-08cf638b739c';
 
   it('returns an order with its item snapshots', async () => {
     const item = {
@@ -94,10 +95,13 @@ describe('OrdersService', () => {
       ordersRepository as unknown as OrdersRepository,
     );
 
-    await expect(service.listUserOrders(userId)).resolves.toEqual([]);
+    await expect(
+      service.listUserOrders(userId, correlationId),
+    ).resolves.toEqual([]);
 
     expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.users.account.get, {
       id: userId,
+      correlationId,
     });
     expect(ordersRepository.findByUserId).toHaveBeenCalledWith(userId);
   });
@@ -155,6 +159,7 @@ describe('OrdersService', () => {
     );
 
     const result = await service.createOrder({
+      correlationId,
       idempotencyKey,
       userId,
       items: [
@@ -165,6 +170,7 @@ describe('OrdersService', () => {
 
     expect(send).toHaveBeenCalledWith(MESSAGE_PATTERNS.users.account.get, {
       id: userId,
+      correlationId,
     });
     expect(transaction.findBooksForUpdate).toHaveBeenCalledWith([bookId]);
     expect(book.availableQuantity).toBe(2);
@@ -240,6 +246,7 @@ describe('OrdersService', () => {
 
     const error = await rejectedValue(
       service.createOrder({
+        correlationId,
         idempotencyKey,
         userId,
         items: [{ bookId, quantity: 2 }],
@@ -273,6 +280,7 @@ describe('OrdersService', () => {
 
     const error = await rejectedValue(
       service.createOrder({
+        correlationId,
         idempotencyKey,
         userId,
         items: [{ bookId, quantity: 1 }],
@@ -316,7 +324,7 @@ describe('OrdersService', () => {
     );
 
     await expect(
-      service.createOrder({ idempotencyKey, userId, items }),
+      service.createOrder({ correlationId, idempotencyKey, userId, items }),
     ).resolves.toEqual(
       expect.objectContaining({ id: existingOrder.id, totalAmount: '19.99' }),
     );
@@ -339,6 +347,7 @@ describe('OrdersService', () => {
 
     const error = await rejectedValue(
       service.createOrder({
+        correlationId,
         idempotencyKey,
         userId,
         items: [{ bookId, quantity: 1 }],
@@ -369,10 +378,14 @@ describe('OrdersService', () => {
       items: [],
       createdAt: new Date('2026-08-10T12:00:00.000Z'),
     } as unknown as Order;
-    const uniqueConflict = new QueryFailedError('INSERT', [], {
-      code: '23505',
-      constraint: 'UQ_orders_idempotency_key',
-    });
+    const uniqueConflict = new QueryFailedError(
+      'INSERT',
+      [],
+      Object.assign(new Error('Duplicate idempotency key'), {
+        code: '23505',
+        constraint: 'UQ_orders_idempotency_key',
+      }),
+    );
     const ordersRepository = {
       findByIdempotencyKey: jest
         .fn()
@@ -386,7 +399,7 @@ describe('OrdersService', () => {
     );
 
     await expect(
-      service.createOrder({ idempotencyKey, userId, items }),
+      service.createOrder({ correlationId, idempotencyKey, userId, items }),
     ).resolves.toEqual(expect.objectContaining({ id: 'winning-order-id' }));
     expect(ordersRepository.findByIdempotencyKey).toHaveBeenCalledTimes(2);
   });

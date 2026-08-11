@@ -15,9 +15,11 @@ describe('ApiGatewayService', () => {
   const bookId = 'd92eb1d3-6ca5-4ae1-a463-1ce744949e95';
   const userId = '67f76ed1-bdcc-4286-9e3f-123fb4ab571e';
   const idempotencyKey = '37dc7ca6-c5b3-4e55-aa46-606fe18d33c4';
+  const correlationId = '5af19211-f08a-4c42-93e3-08cf638b739c';
 
   beforeEach(() => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    jest.spyOn(Logger.prototype, 'log').mockImplementation();
   });
 
   afterEach(() => {
@@ -34,12 +36,15 @@ describe('ApiGatewayService', () => {
     );
 
     await expect(
-      service.dispatch({ method: 'GET', path: '/api/books/catalog' }),
+      service.dispatch({
+        method: 'GET',
+        path: '/api/books/catalog',
+        correlationId,
+      }),
     ).resolves.toEqual([{ id: bookId }]);
-    expect(booksSend).toHaveBeenCalledWith(
-      MESSAGE_PATTERNS.books.catalog.get,
-      {},
-    );
+    expect(booksSend).toHaveBeenCalledWith(MESSAGE_PATTERNS.books.catalog.get, {
+      correlationId,
+    });
   });
 
   it('extracts and validates a dynamic book ID before sending', async () => {
@@ -51,10 +56,15 @@ describe('ApiGatewayService', () => {
       new GatewayRouteRegistry(),
     );
 
-    await service.dispatch({ method: 'GET', path: `/api/books/${bookId}` });
+    await service.dispatch({
+      method: 'GET',
+      path: `/api/books/${bookId}`,
+      correlationId,
+    });
 
     expect(booksSend).toHaveBeenCalledWith(MESSAGE_PATTERNS.books.book.get, {
       id: bookId,
+      correlationId,
     });
   });
 
@@ -74,11 +84,16 @@ describe('ApiGatewayService', () => {
       availableQuantity: 5,
     };
 
-    await service.dispatch({ method: 'POST', path: '/api/books', body });
+    await service.dispatch({
+      method: 'POST',
+      path: '/api/books',
+      body,
+      correlationId,
+    });
 
     expect(booksSend).toHaveBeenCalledWith(
       MESSAGE_PATTERNS.books.book.create,
-      expect.objectContaining(body),
+      expect.objectContaining({ ...body, correlationId }),
     );
   });
 
@@ -101,11 +116,12 @@ describe('ApiGatewayService', () => {
       method: 'POST',
       path: '/api/users/signup',
       body,
+      correlationId,
     });
 
     expect(usersSend).toHaveBeenCalledWith(
       MESSAGE_PATTERNS.users.account.signup,
-      expect.objectContaining(body),
+      expect.objectContaining({ ...body, correlationId }),
     );
   });
 
@@ -127,11 +143,12 @@ describe('ApiGatewayService', () => {
       path: '/api/orders',
       body,
       headers: { 'idempotency-key': idempotencyKey },
+      correlationId,
     });
 
     expect(ordersSend).toHaveBeenCalledWith(
       MESSAGE_PATTERNS.orders.order.create,
-      expect.objectContaining({ ...body, idempotencyKey }),
+      expect.objectContaining({ ...body, idempotencyKey, correlationId }),
     );
   });
 

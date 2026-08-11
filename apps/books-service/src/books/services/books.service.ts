@@ -154,7 +154,9 @@ export class BooksService {
   }
 
   private hasUpdates(request: UpdateBookRequest): boolean {
-    return Object.keys(request).some((key) => key !== 'id');
+    return Object.keys(request).some(
+      (key) => key !== 'id' && key !== 'correlationId',
+    );
   }
 
   private normalizeIsbn(isbn: string): string {

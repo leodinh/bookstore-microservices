@@ -7,6 +7,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { CorrelatedRequest } from '../correlated.request';
 
 export class CreateOrderItemRequest {
   @IsUUID()
@@ -17,7 +18,7 @@ export class CreateOrderItemRequest {
   quantity!: number;
 }
 
-export class CreateOrderRequest {
+export class CreateOrderRequest extends CorrelatedRequest {
   @IsUUID()
   idempotencyKey!: string;
 

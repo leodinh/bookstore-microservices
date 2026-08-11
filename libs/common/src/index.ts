@@ -1,5 +1,6 @@
 export * from './common.module';
 export * from './common.service';
+export * from './contracts/correlated.request';
 export * from './contracts/books/book.response';
 export * from './contracts/books/create-book.request';
 export * from './contracts/books/get-book.request';
@@ -14,4 +15,5 @@ export * from './contracts/users/get-user.response';
 export * from './contracts/users/signup-user.request';
 export * from './contracts/users/signup-user.response';
 export * from './message-patterns';
+export * from './interceptors/rpc-logging.interceptor';
 export * from './pipes/rpc-validation.pipe';

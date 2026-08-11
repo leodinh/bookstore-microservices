@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ThrottlerModule } from '@nestjs/throttler';
@@ -9,6 +9,7 @@ import {
   GATEWAY_RESILIENCE_CONFIG,
 } from './config/gateway-resilience.config';
 import { GatewayThrottlerGuard } from './guards/gateway-throttler.guard';
+import { CorrelationIdMiddleware } from './middleware/correlation-id.middleware';
 import { GatewayRouteRegistry } from './routing/gateway-route.registry';
 
 const resilienceConfig = createGatewayResilienceConfig();
@@ -64,4 +65,8 @@ const resilienceConfig = createGatewayResilienceConfig();
     },
   ],
 })
-export class ApiGatewayModule {}
+export class ApiGatewayModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(CorrelationIdMiddleware).forRoutes('*');
+  }
+}

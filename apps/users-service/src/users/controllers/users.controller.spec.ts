@@ -2,6 +2,8 @@ import { UsersService } from '../services/users.service';
 import { UsersController } from './users.controller';
 
 describe('UsersController', () => {
+  const correlationId = '5af19211-f08a-4c42-93e3-08cf638b739c';
+
   it('delegates the get-user message to the service', async () => {
     const response = { id: 'user-id' };
     const usersService = {
@@ -11,12 +13,15 @@ describe('UsersController', () => {
       usersService as unknown as UsersService,
     );
 
-    await expect(controller.getUser({ id: 'user-id' })).resolves.toBe(response);
+    await expect(
+      controller.getUser({ id: 'user-id', correlationId }),
+    ).resolves.toBe(response);
     expect(usersService.getUser).toHaveBeenCalledWith('user-id');
   });
 
   it('delegates the signup message to the service', async () => {
     const request = {
+      correlationId,
       firstName: 'Sam',
       lastName: 'Taylor',
       email: 'sam@example.com',

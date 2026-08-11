@@ -46,5 +46,8 @@ export class UpdateBookBodyRequest {
 
 export class UpdateBookRequest extends UpdateBookBodyRequest {
   @IsUUID()
+  correlationId!: string;
+
+  @IsUUID()
   id!: string;
 }

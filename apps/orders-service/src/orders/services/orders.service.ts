@@ -44,7 +44,7 @@ export class OrdersService {
       return this.replayOrder(existingOrder, requestHash);
     }
 
-    await this.ensureUserExists(request.userId);
+    await this.ensureUserExists(request.userId, request.correlationId);
 
     try {
       return await this.ordersRepository.runInTransaction(
@@ -121,14 +121,20 @@ export class OrdersService {
     return this.toOrderResponse(order, order.items);
   }
 
-  async listUserOrders(userId: string): Promise<OrderResponse[]> {
-    await this.ensureUserExists(userId);
+  async listUserOrders(
+    userId: string,
+    correlationId: string,
+  ): Promise<OrderResponse[]> {
+    await this.ensureUserExists(userId, correlationId);
     const orders = await this.ordersRepository.findByUserId(userId);
 
     return orders.map((order) => this.toOrderResponse(order, order.items));
   }
 
-  private async ensureUserExists(userId: string): Promise<void> {
+  private async ensureUserExists(
+    userId: string,
+    correlationId: string,
+  ): Promise<void> {
     const timeoutMs = Number(process.env.MICROSERVICE_TIMEOUT_MS ?? 5000);
 
     try {
@@ -136,6 +142,7 @@ export class OrdersService {
         this.usersClient
           .send<GetUserResponse>(MESSAGE_PATTERNS.users.account.get, {
             id: userId,
+            correlationId,
           })
           .pipe(timeout(timeoutMs)),
       );

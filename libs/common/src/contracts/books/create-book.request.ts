@@ -9,8 +9,9 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { CorrelatedRequest } from '../correlated.request';
 
-export class CreateBookRequest {
+export class CreateBookRequest extends CorrelatedRequest {
   @IsString()
   @Length(1, 255)
   title!: string;

@@ -5,8 +5,9 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { CorrelatedRequest } from '../correlated.request';
 
-export class SignupUserRequest {
+export class SignupUserRequest extends CorrelatedRequest {
   @IsString()
   @Length(1, 100)
   firstName!: string;

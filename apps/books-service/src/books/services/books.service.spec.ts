@@ -11,6 +11,7 @@ function rejectedValue(promise: Promise<unknown>): Promise<unknown> {
 }
 
 describe('BooksService', () => {
+  const correlationId = '5af19211-f08a-4c42-93e3-08cf638b739c';
   const book = {
     id: '45a4a46d-e48f-4b28-9ec3-45281fbee2a5',
     title: 'Distributed Systems Fundamentals',
@@ -45,6 +46,7 @@ describe('BooksService', () => {
     const service = new BooksService(repository as unknown as BooksRepository);
 
     const result = await service.createBook({
+      correlationId,
       title: ' A New Book ',
       author: ' An Author ',
       isbn: '978-0-00000-003-2',
@@ -83,6 +85,7 @@ describe('BooksService', () => {
 
     const error = await rejectedValue(
       service.createBook({
+        correlationId,
         title: 'Duplicate',
         author: 'An Author',
         isbn: book.isbn,
@@ -147,6 +150,7 @@ describe('BooksService', () => {
     const service = new BooksService(repository as unknown as BooksRepository);
 
     const result = await service.updateBook({
+      correlationId,
       id: book.id,
       title: ' Updated Title ',
       price: 49.5,
@@ -173,7 +177,9 @@ describe('BooksService', () => {
     };
     const service = new BooksService(repository as unknown as BooksRepository);
 
-    const error = await rejectedValue(service.updateBook({ id: book.id }));
+    const error = await rejectedValue(
+      service.updateBook({ id: book.id, correlationId }),
+    );
 
     expect(error).toBeInstanceOf(RpcException);
     expect((error as RpcException).getError()).toEqual(

@@ -11,8 +11,9 @@ export class GatewayThrottlerGuard extends ThrottlerGuard {
     throttlerLimitDetail: ThrottlerLimitDetail,
   ): Promise<void> {
     const request = context.switchToHttp().getRequest<Request>();
+    const correlationId = request.get('X-Correlation-Id') ?? 'unknown';
     this.logger.warn(
-      `Rate limit exceeded for ${request.method} ${request.path}`,
+      `[${correlationId}] Rate limit exceeded for ${request.method} ${request.path}`,
     );
 
     await super.throwThrottlingException(context, throttlerLimitDetail);

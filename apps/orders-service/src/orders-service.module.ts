@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { DatabaseModule } from '@app/database';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { RpcLoggingInterceptor } from '@app/common';
 import { Book } from '../../books-service/src/books/entities/book.entity';
 import { User } from '../../users-service/src/users/entities/user.entity';
 import { OrdersController } from './orders/controllers/orders.controller';
@@ -26,6 +28,10 @@ import { OrdersService } from './orders/services/orders.service';
     ]),
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, OrdersRepository],
+  providers: [
+    OrdersService,
+    OrdersRepository,
+    { provide: APP_INTERCEPTOR, useClass: RpcLoggingInterceptor },
+  ],
 })
 export class OrdersServiceModule {}

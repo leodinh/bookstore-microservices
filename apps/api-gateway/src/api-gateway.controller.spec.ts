@@ -4,6 +4,7 @@ import { ApiGatewayService } from './api-gateway.service';
 
 describe('ApiGatewayController', () => {
   it('forwards generic HTTP request data to the dispatcher', async () => {
+    const correlationId = '5af19211-f08a-4c42-93e3-08cf638b739c';
     const response = { id: 'book-id' };
     const service = {
       dispatch: jest.fn().mockResolvedValue(response),
@@ -15,7 +16,9 @@ describe('ApiGatewayController', () => {
       method: 'POST',
       path: '/api/books',
       query: { source: 'test' },
-      get: jest.fn().mockReturnValue('request-key'),
+      get: jest.fn((header: string) =>
+        header === 'X-Correlation-Id' ? correlationId : 'request-key',
+      ),
     } as unknown as Request;
     const body = { title: 'A Book' };
 
@@ -25,6 +28,7 @@ describe('ApiGatewayController', () => {
       path: '/api/books',
       body,
       query: { source: 'test' },
+      correlationId,
       headers: { 'idempotency-key': 'request-key' },
     });
   });

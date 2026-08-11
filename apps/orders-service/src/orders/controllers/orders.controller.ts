@@ -24,6 +24,9 @@ export class OrdersController {
 
   @MessagePattern(MESSAGE_PATTERNS.orders.user.list)
   listUserOrders(@Payload() request: ListUserOrdersRequest) {
-    return this.ordersService.listUserOrders(request.userId);
+    return this.ordersService.listUserOrders(
+      request.userId,
+      request.correlationId,
+    );
   }
 }

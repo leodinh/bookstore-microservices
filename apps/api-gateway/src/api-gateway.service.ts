@@ -10,12 +10,14 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
+import { randomUUID } from 'node:crypto';
 import {
   catchError,
   firstValueFrom,
   throwError,
   timeout,
   TimeoutError,
+  tap,
 } from 'rxjs';
 import {
   createGatewayResilienceConfig,
@@ -39,6 +41,7 @@ export interface GatewayDispatchRequest {
   body?: unknown;
   query?: Record<string, unknown>;
   headers?: Record<string, string | undefined>;
+  correlationId?: string;
 }
 
 @Injectable()
@@ -61,6 +64,7 @@ export class ApiGatewayService {
 
   async dispatch(request: GatewayDispatchRequest): Promise<unknown> {
     const route = this.routeRegistry.resolve(request.method, request.path);
+    const correlationId = request.correlationId ?? randomUUID();
 
     if (!route) {
       throw new NotFoundException({
@@ -70,12 +74,15 @@ export class ApiGatewayService {
       });
     }
 
-    const rawPayload = route.buildPayload({
-      params: route.params,
-      body: request.body,
-      query: request.query ?? {},
-      headers: request.headers ?? {},
-    });
+    const rawPayload = {
+      ...route.buildPayload({
+        params: route.params,
+        body: request.body,
+        query: request.query ?? {},
+        headers: request.headers ?? {},
+      }),
+      correlationId,
+    };
     const payload = route.requestType
       ? ((await this.routeValidationPipe.transform(rawPayload, {
           type: 'body',
@@ -83,7 +90,12 @@ export class ApiGatewayService {
         })) as object)
       : rawPayload;
 
-    return this.send(this.getClient(route.clientName), route.pattern, payload);
+    return this.send(
+      this.getClient(route.clientName),
+      route.pattern,
+      payload,
+      correlationId,
+    );
   }
 
   private getClient(clientName: GatewayClientName): ClientProxy {
@@ -97,21 +109,36 @@ export class ApiGatewayService {
     }
   }
 
-  private send(client: ClientProxy, pattern: object, payload: object) {
+  private send(
+    client: ClientProxy,
+    pattern: object,
+    payload: object,
+    correlationId: string,
+  ) {
+    const patternName = JSON.stringify(pattern);
+    this.logger.log(`[${correlationId}] TCP ${patternName} started`);
+
     return firstValueFrom(
       client.send(pattern, payload).pipe(
         timeout(this.resilienceConfig.microserviceTimeoutMs),
+        tap(() =>
+          this.logger.log(`[${correlationId}] TCP ${patternName} completed`),
+        ),
         catchError((error: unknown) =>
-          throwError(() => this.toHttpException(error, pattern)),
+          throwError(() => this.toHttpException(error, pattern, correlationId)),
         ),
       ),
     );
   }
 
-  private toHttpException(error: unknown, pattern: object): HttpException {
+  private toHttpException(
+    error: unknown,
+    pattern: object,
+    correlationId: string,
+  ): HttpException {
     if (error instanceof TimeoutError) {
       this.logger.warn(
-        `Microservice request timed out for pattern ${JSON.stringify(pattern)}`,
+        `[${correlationId}] Microservice request timed out for pattern ${JSON.stringify(pattern)}`,
       );
       return new GatewayTimeoutException({
         statusCode: 504,
@@ -122,7 +149,7 @@ export class ApiGatewayService {
 
     if (this.isTransportUnavailableError(error)) {
       this.logger.warn(
-        `Microservice unavailable for pattern ${JSON.stringify(pattern)}`,
+        `[${correlationId}] Microservice unavailable for pattern ${JSON.stringify(pattern)}`,
       );
       return new ServiceUnavailableException({
         statusCode: 503,

@@ -12,6 +12,7 @@ function rejectedValue(promise: Promise<unknown>): Promise<unknown> {
 
 describe('UsersService', () => {
   const request = {
+    correlationId: '5af19211-f08a-4c42-93e3-08cf638b739c',
     firstName: ' Sam ',
     lastName: ' Taylor ',
     email: 'SAM@Example.com',

@@ -2,8 +2,11 @@ import { BooksService } from '../services/books.service';
 import { BooksController } from './books.controller';
 
 describe('BooksController', () => {
+  const correlationId = '5af19211-f08a-4c42-93e3-08cf638b739c';
+
   it('delegates a create-book message to the service', async () => {
     const request = {
+      correlationId,
       title: 'A Book',
       author: 'An Author',
       isbn: '9780000000032',
@@ -38,12 +41,14 @@ describe('BooksController', () => {
     };
     const controller = new BooksController(service as unknown as BooksService);
 
-    await expect(controller.getBook({ id: 'book-id' })).resolves.toBe(book);
+    await expect(
+      controller.getBook({ id: 'book-id', correlationId }),
+    ).resolves.toBe(book);
     expect(service.getBook).toHaveBeenCalledWith('book-id');
   });
 
   it('delegates an update-book message to the service', async () => {
-    const request = { id: 'book-id', price: 24.99 };
+    const request = { id: 'book-id', price: 24.99, correlationId };
     const book = { id: 'book-id', price: '24.99' };
     const service = {
       updateBook: jest.fn().mockResolvedValue(book),
@@ -61,9 +66,9 @@ describe('BooksController', () => {
     };
     const controller = new BooksController(service as unknown as BooksService);
 
-    await expect(controller.deactivateBook({ id: 'book-id' })).resolves.toBe(
-      book,
-    );
+    await expect(
+      controller.deactivateBook({ id: 'book-id', correlationId }),
+    ).resolves.toBe(book);
     expect(service.deactivateBook).toHaveBeenCalledWith('book-id');
   });
 });
