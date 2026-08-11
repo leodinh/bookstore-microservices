@@ -59,6 +59,39 @@ pnpm start:orders
 pnpm start:gateway
 ```
 
+## Run as separate Docker services
+
+Build and start PostgreSQL, migrations, the three TCP microservices, and the HTTP Gateway:
+
+```bash
+pnpm docker:up
+docker compose ps
+```
+
+Only these host ports are published:
+
+```text
+localhost:3000 → API Gateway
+localhost:5433 → PostgreSQL development access
+```
+
+Users, Books, and Orders expose ports only inside the Compose network. The Gateway reaches them through Docker DNS names such as `books-service`; `127.0.0.1` inside a container refers to that container itself.
+
+Schema migrations run as a one-shot container before the services start. To insert the sample books from inside Docker:
+
+```bash
+pnpm docker:seed
+```
+
+Inspect all service logs or stop the application with:
+
+```bash
+pnpm docker:logs
+pnpm docker:down
+```
+
+`docker:down` keeps the PostgreSQL volume. It stops containers and the Compose network but does not erase bookstore data.
+
 ## Example request flow
 
 Create an order with a client-generated UUID:

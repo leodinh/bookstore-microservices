@@ -15,5 +15,154 @@ services:
     volumes:
       - bookstore-postgres-data:/var/lib/postgresql/data
 
+  migrations:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrations
+    environment:
+      DATABASE_URL: postgresql://bookstore:bookstore@postgres:5432/bookstore
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  users-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        APP_NAME: users-service
+    environment:
+      DATABASE_URL: postgresql://bookstore:bookstore@postgres:5432/bookstore
+      USERS_SERVICE_HOST: 0.0.0.0
+      USERS_SERVICE_PORT: 4001
+      PASSWORD_HASH_ROUNDS: 12
+    expose:
+      - '4001'
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "const net=require('node:net');const socket=net.connect(4001,'127.0.0.1');socket.on('connect',()=>{socket.end();process.exit(0)});socket.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),1000)",
+        ]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+    init: true
+    restart: unless-stopped
+
+  books-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        APP_NAME: books-service
+    environment:
+      DATABASE_URL: postgresql://bookstore:bookstore@postgres:5432/bookstore
+      BOOKS_SERVICE_HOST: 0.0.0.0
+      BOOKS_SERVICE_PORT: 4002
+    expose:
+      - '4002'
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "const net=require('node:net');const socket=net.connect(4002,'127.0.0.1');socket.on('connect',()=>{socket.end();process.exit(0)});socket.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),1000)",
+        ]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+    init: true
+    restart: unless-stopped
+
+  orders-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        APP_NAME: orders-service
+    environment:
+      DATABASE_URL: postgresql://bookstore:bookstore@postgres:5432/bookstore
+      ORDERS_SERVICE_HOST: 0.0.0.0
+      ORDERS_SERVICE_PORT: 4003
+      USERS_SERVICE_HOST: users-service
+      USERS_SERVICE_PORT: 4001
+      MICROSERVICE_TIMEOUT_MS: 5000
+    expose:
+      - '4003'
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      users-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "const net=require('node:net');const socket=net.connect(4003,'127.0.0.1');socket.on('connect',()=>{socket.end();process.exit(0)});socket.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),1000)",
+        ]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+    init: true
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        APP_NAME: api-gateway
+    environment:
+      API_GATEWAY_PORT: 3000
+      USERS_SERVICE_HOST: users-service
+      USERS_SERVICE_PORT: 4001
+      BOOKS_SERVICE_HOST: books-service
+      BOOKS_SERVICE_PORT: 4002
+      ORDERS_SERVICE_HOST: orders-service
+      ORDERS_SERVICE_PORT: 4003
+      MICROSERVICE_TIMEOUT_MS: 5000
+      THROTTLE_TTL_MS: 60000
+      THROTTLE_LIMIT: 100
+    ports:
+      - '3000:3000'
+    depends_on:
+      users-service:
+        condition: service_healthy
+      books-service:
+        condition: service_healthy
+      orders-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/books/catalog').then(response=>process.exit(response.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    init: true
+    restart: unless-stopped
+
 volumes:
   bookstore-postgres-data:
