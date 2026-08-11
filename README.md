@@ -1,94 +1,129 @@
 # Bookstore Microservices
 
-A learning-first NestJS project that grows into a bookstore made of an HTTP API Gateway and three internal TCP microservices.
-
-## Milestone 1: prove the architecture
-
-The first milestone intentionally keeps the catalog in memory. It proves this request path before database complexity is introduced:
+A learning-first NestJS bookstore with one public HTTP Gateway and three internal TCP microservices.
 
 ```text
-Client --HTTP--> API Gateway --TCP--> Books Service
+HTTP client
+    |
+    v
+API Gateway :3000
+    |
+    +-- TCP --> Users  :4001 --> PostgreSQL
+    +-- TCP --> Books  :4002 --> PostgreSQL
+    +-- TCP --> Orders :4003 --> PostgreSQL
+                    |
+                    +-- TCP --> Users
 ```
 
-`GET /api/books/catalog` enters the public gateway. The gateway sends the controlled `{ cmd: 'books.catalog.get' }` message pattern to the Books service and returns its response.
+The Gateway is the only public application. Clients cannot choose arbitrary TCP message patterns; a controlled route registry maps each allowed HTTP method and path to a known microservice command.
 
 ## Applications
 
-| Application | Role | Default port |
+| Application | Responsibility | Default port |
 | --- | --- | --- |
-| API Gateway | Only public HTTP entry point | 3000 |
-| Users service | User accounts over TCP | 4001 |
-| Books service | Catalog and inventory over TCP | 4002 |
-| Orders service | Purchasing and order history over TCP | 4003 |
+| API Gateway | HTTP routing, validation, throttling, timeouts, and error translation | 3000 |
+| Users service | Signup, password hashing, and user lookup | 4001 |
+| Books service | Catalog, book management, and inventory | 4002 |
+| Orders service | Transactional purchases, snapshots, history, and idempotency | 4003 |
 
-Shared message patterns live in `libs/common`. Client input never chooses a raw TCP pattern.
+## NestJS structure
 
-## Run milestone 1
+Each feature follows the same separation:
 
-Install dependencies:
+- **Controller:** receives a transport request and delegates it.
+- **Service:** owns business rules and orchestration.
+- **Repository:** owns database queries and transactions.
+- **Entity:** maps domain data to database columns and relationships.
+- **Module:** wires controllers, providers, database features, and TCP clients.
+- **Shared contract:** validates the message shape at both ends of a TCP call.
+
+Shared DTOs and message patterns live in `libs/common`. Shared database connection infrastructure lives in `libs/database`; domain entities remain owned by their services.
+
+## Setup
 
 ```bash
 pnpm install
+pnpm db:up
+pnpm migration:run
+pnpm seed
 ```
 
-Start the Books service:
+PostgreSQL uses host port `5433` so it does not conflict with a typical local PostgreSQL installation on `5432`.
+
+Start each application in a separate terminal:
 
 ```bash
+pnpm start:users
 pnpm start:books
-```
-
-In another terminal, start the gateway:
-
-```bash
+pnpm start:orders
 pnpm start:gateway
 ```
 
-Then request the catalog:
+## Example request flow
+
+Create an order with a client-generated UUID:
 
 ```bash
-curl http://localhost:3000/api/books/catalog
+curl -X POST http://localhost:3000/api/orders \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: 4f348ef9-6f07-4df5-8221-e1e4136ea9cc' \
+  --data '{
+    "userId": "67f76ed1-bdcc-4286-9e3f-123fb4ab571e",
+    "items": [
+      {
+        "bookId": "d92eb1d3-6ca5-4ae1-a463-1ce744949e95",
+        "quantity": 2
+      }
+    ]
+  }'
 ```
 
-## Useful commands
+The Gateway validates the request, sends the controlled `orders.order.create` TCP pattern, and translates the result back to HTTP. Repeating the same key and request returns the original order without changing stock again. Reusing the key for a different request returns `409 IDEMPOTENCY_KEY_REUSED`.
+
+## Resilience behavior
+
+- Global Gateway throttling returns `429` before a controller reaches a microservice.
+- A refused or lost TCP connection becomes `503 MICROSERVICE_UNAVAILABLE`.
+- A microservice that exceeds the response deadline becomes `504 MICROSERVICE_TIMEOUT`.
+- PostgreSQL transactions and row locks prevent partial orders and lost inventory updates.
+- A unique persisted idempotency key prevents duplicate orders across retries and replicas.
+
+The built-in throttle store is in memory and is appropriate for local development. A production deployment with multiple Gateway replicas should use shared throttle storage.
+
+## Testing
+
+Fast unit tests exercise controllers, services, repositories, validation, routing, and error translation in isolation:
+
+```bash
+pnpm test
+```
+
+The E2E suite starts the real Gateway and all three TCP microservices. It creates isolated test records, verifies PostgreSQL state, and removes those records afterward:
 
 ```bash
 pnpm db:up
-pnpm db:status
-pnpm db:down
-pnpm migration:show
 pnpm migration:run
-pnpm seed
-pnpm build
-pnpm lint
-pnpm test
-pnpm start:users
-pnpm start:orders
+pnpm test:e2e
 ```
 
-## Learning roadmap
+E2E services use ports `4401–4403` by default. Override `USERS_SERVICE_PORT`, `BOOKS_SERVICE_PORT`, or `ORDERS_SERVICE_PORT` if one is occupied.
 
-1. Workspace and TCP request/response - current milestone
-2. PostgreSQL, TypeORM, migrations, and seed data - in progress
-3. Users signup and password hashing
-4. Books catalog and inventory persistence
-5. Transactional order creation and historical snapshots
-6. Controlled generic gateway routing
-7. Validation, structured errors, correlation IDs, and logging
-8. Throttling, timeouts, idempotency, and integration tests
+Run all static checks and application builds with:
 
-## Next exercise
+```bash
+pnpm lint
+pnpm build
+```
 
-Trace `GET /api/books/catalog` through these files:
+## Database commands
 
-1. `apps/api-gateway/src/api-gateway.controller.ts`
-2. `apps/api-gateway/src/api-gateway.service.ts`
-3. `libs/common/src/message-patterns.ts`
-4. `apps/books-service/src/books-service.controller.ts`
+```bash
+pnpm db:status
+pnpm migration:show
+pnpm migration:run
+pnpm migration:revert
+pnpm seed
+pnpm db:down
+```
 
-The key idea is that HTTP concerns stop at the gateway. The Books service only knows about TCP messages and bookstore logic.
-
-## Milestone 2 notes
-
-PostgreSQL runs in Docker on host port `5433` because port `5432` is commonly occupied by a local PostgreSQL installation. Inside the container PostgreSQL still uses port `5432`.
-
-The shared `DatabaseModule` contains connection infrastructure only. Domain entities and repositories remain owned by their services. `synchronize` is disabled so all schema changes must be expressed as migrations.
+TypeORM `synchronize` is disabled. Every schema change must be captured in a migration so local, test, and production databases can evolve predictably.
