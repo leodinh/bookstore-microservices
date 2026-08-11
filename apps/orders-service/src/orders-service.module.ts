@@ -7,6 +7,7 @@ import { RpcLoggingInterceptor } from '@app/common';
 import { Book } from '../../books-service/src/books/entities/book.entity';
 import { User } from '../../users-service/src/users/entities/user.entity';
 import { OrdersController } from './orders/controllers/orders.controller';
+import { OrderEventsPublisher } from './orders/events/order-events.publisher';
 import { Order } from './orders/entities/order.entity';
 import { OrderItem } from './orders/entities/order-item.entity';
 import { OrdersRepository } from './orders/repositories/orders.repository';
@@ -25,12 +26,28 @@ import { OrdersService } from './orders/services/orders.service';
           port: Number(process.env.USERS_SERVICE_PORT ?? 4001),
         },
       },
+      {
+        name: 'ORDER_EVENTS',
+        transport: Transport.RMQ,
+        options: {
+          urls: [
+            process.env.RABBITMQ_URL ??
+              'amqp://bookstore:bookstore@127.0.0.1:5672',
+          ],
+          queue:
+            process.env.RABBITMQ_NOTIFICATIONS_QUEUE ??
+            'bookstore_notifications',
+          queueOptions: { durable: true },
+          persistent: true,
+        },
+      },
     ]),
   ],
   controllers: [OrdersController],
   providers: [
     OrdersService,
     OrdersRepository,
+    OrderEventsPublisher,
     { provide: APP_INTERCEPTOR, useClass: RpcLoggingInterceptor },
   ],
 })

@@ -15,6 +15,23 @@ services:
     volumes:
       - bookstore-postgres-data:/var/lib/postgresql/data
 
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: bookstore
+      RABBITMQ_DEFAULT_PASS: bookstore
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'check_port_connectivity']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - bookstore-rabbitmq-data:/var/lib/rabbitmq
+
   migrations:
     build:
       context: .
@@ -102,12 +119,16 @@ services:
       USERS_SERVICE_HOST: users-service
       USERS_SERVICE_PORT: 4001
       MICROSERVICE_TIMEOUT_MS: 5000
+      RABBITMQ_URL: amqp://bookstore:bookstore@rabbitmq:5672
+      RABBITMQ_NOTIFICATIONS_QUEUE: bookstore_notifications
     expose:
       - '4003'
     depends_on:
       migrations:
         condition: service_completed_successfully
       users-service:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     healthcheck:
       test:
@@ -120,6 +141,22 @@ services:
       interval: 5s
       timeout: 2s
       retries: 10
+    init: true
+    restart: unless-stopped
+
+  notifications-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        APP_NAME: notifications-service
+    environment:
+      RABBITMQ_URL: amqp://bookstore:bookstore@rabbitmq:5672
+      RABBITMQ_NOTIFICATIONS_QUEUE: bookstore_notifications
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     init: true
     restart: unless-stopped
 
@@ -166,3 +203,4 @@ services:
 
 volumes:
   bookstore-postgres-data:
+  bookstore-rabbitmq-data:

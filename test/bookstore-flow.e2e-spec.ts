@@ -7,6 +7,8 @@ import { RpcValidationPipe } from '@app/common';
 import { ApiGatewayModule } from '../apps/api-gateway/src/api-gateway.module';
 import { BooksServiceModule } from '../apps/books-service/src/books-service.module';
 import { OrdersServiceModule } from '../apps/orders-service/src/orders-service.module';
+import { NotificationsServiceModule } from '../apps/notifications-service/src/notifications-service.module';
+import { NotificationsService } from '../apps/notifications-service/src/notifications/services/notifications.service';
 import { UsersServiceModule } from '../apps/users-service/src/users-service.module';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
@@ -41,6 +43,21 @@ function responseBody<T>(body: unknown): T {
   return body as T;
 }
 
+async function waitFor(
+  condition: () => boolean,
+  timeoutMs = 5000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (!condition()) {
+    if (Date.now() >= deadline) {
+      throw new Error('Timed out waiting for the asynchronous event.');
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 describe('Bookstore microservices (e2e)', () => {
   const databaseUrl =
     process.env.DATABASE_URL ??
@@ -57,6 +74,9 @@ describe('Bookstore microservices (e2e)', () => {
   let usersApp: INestMicroservice | undefined;
   let booksApp: INestMicroservice | undefined;
   let ordersApp: INestMicroservice | undefined;
+  let notificationsApp: INestMicroservice | undefined;
+  let handleOrderCreated:
+    jest.SpiedFunction<NotificationsService['handleOrderCreated']> | undefined;
   let database: Pool | undefined;
   let userId: string | undefined;
   let bookId: string | undefined;
@@ -66,6 +86,28 @@ describe('Bookstore microservices (e2e)', () => {
     const booksPort = Number(process.env.BOOKS_SERVICE_PORT);
     const ordersPort = Number(process.env.ORDERS_SERVICE_PORT);
     process.env.DATABASE_URL = databaseUrl;
+
+    notificationsApp =
+      await NestFactory.createMicroservice<MicroserviceOptions>(
+        NotificationsServiceModule,
+        {
+          logger: false,
+          transport: Transport.RMQ,
+          options: {
+            urls: [process.env.RABBITMQ_URL as string],
+            queue: process.env.RABBITMQ_NOTIFICATIONS_QUEUE,
+            queueOptions: { durable: true },
+            noAck: false,
+            prefetchCount: 10,
+          },
+        },
+      );
+    notificationsApp.useGlobalPipes(new RpcValidationPipe());
+    handleOrderCreated = jest.spyOn(
+      notificationsApp.get(NotificationsService),
+      'handleOrderCreated',
+    );
+    await notificationsApp.listen();
 
     usersApp = await NestFactory.createMicroservice<MicroserviceOptions>(
       UsersServiceModule,
@@ -131,6 +173,7 @@ describe('Bookstore microservices (e2e)', () => {
 
     await gatewayApp?.close();
     await Promise.all([
+      notificationsApp?.close(),
       ordersApp?.close(),
       booksApp?.close(),
       usersApp?.close(),
@@ -201,6 +244,26 @@ describe('Bookstore microservices (e2e)', () => {
     const firstCorrelationId = firstOrderResponse.get('x-correlation-id');
     expect(firstCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
     expect(firstCorrelationId).not.toBe(duplicatedClientCorrelationId);
+    await waitFor(() =>
+      Boolean(
+        handleOrderCreated?.mock.calls.some(
+          ([event]) => event.orderId === firstOrder.id,
+        ),
+      ),
+    );
+    const publishedEvent = handleOrderCreated?.mock.calls.find(
+      ([event]) => event.orderId === firstOrder.id,
+    )?.[0];
+    expect(publishedEvent).toEqual(
+      expect.objectContaining({
+        correlationId: firstCorrelationId,
+        orderId: firstOrder.id,
+        userId,
+        status: 'CONFIRMED',
+        totalAmount: '25.00',
+        itemCount: 1,
+      }),
+    );
 
     const replayResponse = await request(httpServer)
       .post('/api/orders')
@@ -214,6 +277,12 @@ describe('Bookstore microservices (e2e)', () => {
     expect(replayedCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
     expect(replayedCorrelationId).not.toBe(duplicatedClientCorrelationId);
     expect(replayedCorrelationId).not.toBe(firstCorrelationId);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(
+      handleOrderCreated?.mock.calls.filter(
+        ([event]) => event.orderId === firstOrder.id,
+      ),
+    ).toHaveLength(1);
 
     const conflictResponse = await request(httpServer)
       .post('/api/orders')

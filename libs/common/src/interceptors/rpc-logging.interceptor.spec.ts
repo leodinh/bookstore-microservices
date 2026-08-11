@@ -30,4 +30,26 @@ describe('RpcLoggingInterceptor', () => {
     expect(log.mock.calls.flat().join(' ')).not.toContain('never-log-this');
     log.mockRestore();
   });
+
+  it('labels RabbitMQ event logs as RMQ', async () => {
+    const correlationId = 'f8972bf4-7a45-4cbf-bb51-e64e527bcf13';
+    const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+    const context = {
+      switchToRpc: () => ({
+        getData: () => ({ correlationId }),
+        getContext: () => ({
+          getPattern: () => 'orders.order.created',
+          getChannelRef: () => ({}),
+        }),
+      }),
+    } as unknown as ExecutionContext;
+    const next = { handle: () => of(undefined) } as CallHandler;
+
+    await lastValueFrom(new RpcLoggingInterceptor().intercept(context, next));
+
+    expect(log).toHaveBeenCalledWith(
+      `[${correlationId}] RMQ orders.order.created started`,
+    );
+    log.mockRestore();
+  });
 });

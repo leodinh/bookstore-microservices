@@ -15,6 +15,7 @@ import { Book } from '../../../../books-service/src/books/entities/book.entity';
 import { OrderItem } from '../entities/order-item.entity';
 import { Order } from '../entities/order.entity';
 import { OrderStatus } from '../enums/order-status.enum';
+import { OrderEventsPublisher } from '../events/order-events.publisher';
 import {
   NewOrderItemRecord,
   OrdersRepository,
@@ -31,6 +32,7 @@ export class OrdersService {
   constructor(
     @Inject('USERS_SERVICE') private readonly usersClient: ClientProxy,
     private readonly ordersRepository: OrdersRepository,
+    private readonly orderEventsPublisher: OrderEventsPublisher,
   ) {}
 
   async createOrder(request: CreateOrderRequest): Promise<CreateOrderResponse> {
@@ -47,7 +49,7 @@ export class OrdersService {
     await this.ensureUserExists(request.userId, request.correlationId);
 
     try {
-      return await this.ordersRepository.runInTransaction(
+      const createdOrder = await this.ordersRepository.runInTransaction(
         async (transaction) => {
           const books = await transaction.findBooksForUpdate(
             requestedItems.map((item) => item.bookId),
@@ -89,6 +91,13 @@ export class OrdersService {
           return this.toOrderResponse(saved.order, saved.items);
         },
       );
+
+      this.orderEventsPublisher.publishOrderCreated(
+        createdOrder,
+        request.correlationId,
+      );
+
+      return createdOrder;
     } catch (error: unknown) {
       if (!this.isIdempotencyKeyConflict(error)) {
         throw error;

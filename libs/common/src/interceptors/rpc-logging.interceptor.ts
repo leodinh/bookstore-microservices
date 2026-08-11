@@ -5,8 +5,12 @@ import {
   Logger,
   NestInterceptor,
 } from '@nestjs/common';
-import { TcpContext } from '@nestjs/microservices';
 import { Observable, tap } from 'rxjs';
+
+interface RpcTransportContext {
+  getPattern(): string;
+  getChannelRef?: unknown;
+}
 
 @Injectable()
 export class RpcLoggingInterceptor implements NestInterceptor {
@@ -15,23 +19,29 @@ export class RpcLoggingInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const startedAt = Date.now();
     const rpcContext = context.switchToRpc();
-    const pattern = rpcContext.getContext<TcpContext>().getPattern();
+    const transportContext = rpcContext.getContext<RpcTransportContext>();
+    const pattern = transportContext.getPattern();
+    const transport = this.getTransportName(transportContext);
     const correlationId = this.getCorrelationId(rpcContext.getData<unknown>());
 
-    this.logger.log(`[${correlationId}] TCP ${pattern} started`);
+    this.logger.log(`[${correlationId}] ${transport} ${pattern} started`);
 
     return next.handle().pipe(
       tap({
         next: () =>
           this.logger.log(
-            `[${correlationId}] TCP ${pattern} completed in ${Date.now() - startedAt}ms`,
+            `[${correlationId}] ${transport} ${pattern} completed in ${Date.now() - startedAt}ms`,
           ),
         error: () =>
           this.logger.error(
-            `[${correlationId}] TCP ${pattern} failed in ${Date.now() - startedAt}ms`,
+            `[${correlationId}] ${transport} ${pattern} failed in ${Date.now() - startedAt}ms`,
           ),
       }),
     );
+  }
+
+  private getTransportName(context: RpcTransportContext): 'RMQ' | 'TCP' {
+    return typeof context.getChannelRef === 'function' ? 'RMQ' : 'TCP';
   }
 
   private getCorrelationId(data: unknown): string {

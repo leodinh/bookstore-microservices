@@ -1,6 +1,6 @@
 # Bookstore Microservices
 
-A learning-first NestJS bookstore with one public HTTP Gateway and three internal TCP microservices.
+A learning-first NestJS bookstore with one public HTTP Gateway, three internal TCP microservices, and one RabbitMQ event consumer.
 
 ```text
 HTTP client
@@ -13,6 +13,8 @@ API Gateway :3000
     +-- TCP --> Orders :4003 --> PostgreSQL
                     |
                     +-- TCP --> Users
+                    |
+                    +-- emit --> RabbitMQ --> Notifications
 ```
 
 The Gateway is the only public application. Clients cannot choose arbitrary TCP message patterns; a controlled route registry maps each allowed HTTP method and path to a known microservice command.
@@ -25,6 +27,7 @@ The Gateway is the only public application. Clients cannot choose arbitrary TCP 
 | Users service | Signup, password hashing, and user lookup | 4001 |
 | Books service | Catalog, book management, and inventory | 4002 |
 | Orders service | Transactional purchases, snapshots, history, and idempotency | 4003 |
+| Notifications service | Asynchronously consumes order-created events | none (RabbitMQ consumer) |
 
 ## NestJS structure
 
@@ -35,7 +38,7 @@ Each feature follows the same separation:
 - **Repository:** owns database queries and transactions.
 - **Entity:** maps domain data to database columns and relationships.
 - **Module:** wires controllers, providers, database features, and TCP clients.
-- **Shared contract:** validates the message shape at both ends of a TCP call.
+- **Shared contract:** validates command, query, and event payloads at transport boundaries.
 
 Shared DTOs and message patterns live in `libs/common`. Shared database connection infrastructure lives in `libs/database`; domain entities remain owned by their services.
 
@@ -43,7 +46,7 @@ Shared DTOs and message patterns live in `libs/common`. Shared database connecti
 
 ```bash
 pnpm install
-pnpm db:up
+docker compose up -d postgres rabbitmq
 pnpm migration:run
 pnpm seed
 ```
@@ -56,12 +59,13 @@ Start each application in a separate terminal:
 pnpm start:users
 pnpm start:books
 pnpm start:orders
+pnpm start:notifications
 pnpm start:gateway
 ```
 
 ## Run as separate Docker services
 
-Build and start PostgreSQL, migrations, the three TCP microservices, and the HTTP Gateway:
+Build and start PostgreSQL, RabbitMQ, migrations, all four internal microservices, and the HTTP Gateway:
 
 ```bash
 pnpm docker:up
@@ -73,9 +77,13 @@ Only these host ports are published:
 ```text
 localhost:3000 → API Gateway
 localhost:5433 → PostgreSQL development access
+localhost:5672 → RabbitMQ AMQP
+localhost:15672 → RabbitMQ management UI
 ```
 
-Users, Books, and Orders expose ports only inside the Compose network. The Gateway reaches them through Docker DNS names such as `books-service`; `127.0.0.1` inside a container refers to that container itself.
+Users, Books, and Orders expose ports only inside the Compose network. The Gateway reaches them through Docker DNS names such as `books-service`; `127.0.0.1` inside a container refers to that container itself. Orders and Notifications connect to RabbitMQ using `rabbitmq:5672`.
+
+The RabbitMQ management UI is available at `http://localhost:15672` with the local-development username and password `bookstore`.
 
 Schema migrations run as a one-shot container before the services start. To insert the sample books from inside Docker:
 
@@ -90,7 +98,7 @@ pnpm docker:logs
 pnpm docker:down
 ```
 
-`docker:down` keeps the PostgreSQL volume. It stops containers and the Compose network but does not erase bookstore data.
+`docker:down` keeps the PostgreSQL and RabbitMQ volumes. It stops containers and the Compose network but does not erase bookstore data or durable queued events.
 
 ## Example request flow
 
@@ -113,6 +121,25 @@ curl -X POST http://localhost:3000/api/orders \
 
 The Gateway validates the request, sends the controlled `orders.order.create` TCP pattern, and translates the result back to HTTP. Repeating the same key and request returns the original order without changing stock again. Reusing the key for a different request returns `409 IDEMPOTENCY_KEY_REUSED`.
 
+## Commands, queries, and events
+
+Nest `ClientProxy.send()` is request-response communication. The caller waits for one handler to return a value, so it is appropriate when the next decision requires the answer. The Gateway uses `send()` for HTTP-to-TCP routing, and Orders uses it to verify a user before committing an order.
+
+Nest `ClientProxy.emit()` publishes a fact and does not wait for a consumer result. After a new order transaction commits, Orders emits the string pattern `orders.order.created` to the durable `bookstore_notifications` RabbitMQ queue. Notifications consumes it with `@EventPattern`.
+
+The event includes an event ID, occurrence time, order and user IDs, total, item count, and the original correlation ID. An idempotent replay returns the existing order without publishing another creation event.
+
+Notifications uses manual RabbitMQ acknowledgements:
+
+```text
+handler succeeds → ack → RabbitMQ removes the delivery
+handler fails    → nack + requeue → RabbitMQ can deliver it again
+```
+
+Manual acknowledgement provides at-least-once delivery behavior, so real side effects such as sending email must eventually be idempotent. This milestone logs the notification rather than calling an external email provider.
+
+This implementation publishes only after the PostgreSQL transaction commits, so it never announces an order that rolled back. A small dual-write failure window still exists: the process could stop after the database commit but before RabbitMQ accepts the event. A production-grade next step is a transactional outbox, followed by retry limits and a dead-letter queue for events that repeatedly fail.
+
 ## Correlation IDs
 
 The Gateway generates a new UUID for every HTTP request, overwrites any client-supplied `X-Correlation-Id`, and returns its generated value in the response header. The ID is added to every TCP request DTO.
@@ -128,6 +155,8 @@ Correlation IDs trace one network attempt. Idempotency keys identify one logical
 - A microservice that exceeds the response deadline becomes `504 MICROSERVICE_TIMEOUT`.
 - PostgreSQL transactions and row locks prevent partial orders and lost inventory updates.
 - A unique persisted idempotency key prevents duplicate orders across retries and replicas.
+- RabbitMQ uses a durable queue and persistent messages for order-created events.
+- Notifications acknowledges an event only after successful handling.
 
 The built-in throttle store is in memory and is appropriate for local development. A production deployment with multiple Gateway replicas should use shared throttle storage.
 
@@ -139,15 +168,15 @@ Fast unit tests exercise controllers, services, repositories, validation, routin
 pnpm test
 ```
 
-The E2E suite starts the real Gateway and all three TCP microservices. It creates isolated test records, verifies PostgreSQL state, and removes those records afterward:
+The E2E suite starts the real Gateway, all three TCP microservices, and a Notifications RabbitMQ consumer. It creates isolated test records, verifies PostgreSQL and event state, and removes database records afterward:
 
 ```bash
-pnpm db:up
+docker compose up -d postgres rabbitmq
 pnpm migration:run
 pnpm test:e2e
 ```
 
-E2E services use ports `4401–4403` by default. Override `USERS_SERVICE_PORT`, `BOOKS_SERVICE_PORT`, or `ORDERS_SERVICE_PORT` if one is occupied.
+E2E services use ports `4401–4403` and the separate RabbitMQ queue `bookstore_notifications_e2e` by default. Override `USERS_SERVICE_PORT`, `BOOKS_SERVICE_PORT`, `ORDERS_SERVICE_PORT`, `RABBITMQ_URL`, or `RABBITMQ_NOTIFICATIONS_QUEUE` when needed.
 
 Run all static checks and application builds with:
 

@@ -20,6 +20,10 @@ function rejectedValue(promise: Promise<unknown>): Promise<unknown> {
   );
 }
 
+function eventPublisher() {
+  return { publishOrderCreated: jest.fn() };
+}
+
 describe('OrdersService', () => {
   const userId = '67f76ed1-bdcc-4286-9e3f-123fb4ab571e';
   const bookId = 'd92eb1d3-6ca5-4ae1-a463-1ce744949e95';
@@ -48,6 +52,7 @@ describe('OrdersService', () => {
     const service = new OrdersService(
       {} as never,
       ordersRepository as unknown as OrdersRepository,
+      eventPublisher() as never,
     );
 
     await expect(service.getOrder(order.id)).resolves.toEqual({
@@ -75,6 +80,7 @@ describe('OrdersService', () => {
     const service = new OrdersService(
       {} as never,
       ordersRepository as unknown as OrdersRepository,
+      eventPublisher() as never,
     );
 
     const error = await rejectedValue(service.getOrder('missing-order'));
@@ -93,6 +99,7 @@ describe('OrdersService', () => {
     const service = new OrdersService(
       { send } as never,
       ordersRepository as unknown as OrdersRepository,
+      eventPublisher() as never,
     );
 
     await expect(
@@ -153,9 +160,11 @@ describe('OrdersService', () => {
         email: 'sam@example.com',
       }),
     );
+    const orderEventsPublisher = eventPublisher();
     const service = new OrdersService(
       { send } as never,
       ordersRepository as unknown as OrdersRepository,
+      orderEventsPublisher as never,
     );
 
     const result = await service.createOrder({
@@ -216,6 +225,10 @@ describe('OrdersService', () => {
       ],
       createdAt: '2026-08-10T12:00:00.000Z',
     });
+    expect(orderEventsPublisher.publishOrderCreated).toHaveBeenCalledWith(
+      result,
+      correlationId,
+    );
   });
 
   it('rejects insufficient stock before saving anything', async () => {
@@ -242,6 +255,7 @@ describe('OrdersService', () => {
     const service = new OrdersService(
       { send: jest.fn().mockReturnValue(of({ id: userId })) } as never,
       ordersRepository as unknown as OrdersRepository,
+      eventPublisher() as never,
     );
 
     const error = await rejectedValue(
@@ -276,6 +290,7 @@ describe('OrdersService', () => {
         send: jest.fn().mockReturnValue(throwError(() => usersError)),
       } as never,
       ordersRepository as unknown as OrdersRepository,
+      eventPublisher() as never,
     );
 
     const error = await rejectedValue(
@@ -318,9 +333,11 @@ describe('OrdersService', () => {
       runInTransaction: jest.fn(),
     };
     const send = jest.fn();
+    const orderEventsPublisher = eventPublisher();
     const service = new OrdersService(
       { send } as never,
       ordersRepository as unknown as OrdersRepository,
+      orderEventsPublisher as never,
     );
 
     await expect(
@@ -330,6 +347,7 @@ describe('OrdersService', () => {
     );
     expect(send).not.toHaveBeenCalled();
     expect(ordersRepository.runInTransaction).not.toHaveBeenCalled();
+    expect(orderEventsPublisher.publishOrderCreated).not.toHaveBeenCalled();
   });
 
   it('rejects reuse of an idempotency key for a different request', async () => {
@@ -343,6 +361,7 @@ describe('OrdersService', () => {
     const service = new OrdersService(
       {} as never,
       ordersRepository as unknown as OrdersRepository,
+      eventPublisher() as never,
     );
 
     const error = await rejectedValue(
@@ -396,6 +415,7 @@ describe('OrdersService', () => {
     const service = new OrdersService(
       { send: jest.fn().mockReturnValue(of({ id: userId })) } as never,
       ordersRepository as unknown as OrdersRepository,
+      eventPublisher() as never,
     );
 
     await expect(
