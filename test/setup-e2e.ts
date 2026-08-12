@@ -6,5 +6,6 @@ process.env.ORDERS_SERVICE_HOST ??= '127.0.0.1';
 process.env.ORDERS_SERVICE_PORT ??= '4403';
 process.env.RABBITMQ_URL ??= 'amqp://bookstore:bookstore@127.0.0.1:5672';
 process.env.RABBITMQ_NOTIFICATIONS_QUEUE ??= 'bookstore_notifications_e2e';
+process.env.OUTBOX_PUBLISHER_ENABLED ??= 'false';
 process.env.PASSWORD_HASH_ROUNDS ??= '4';
 process.env.THROTTLE_LIMIT ??= '1000';

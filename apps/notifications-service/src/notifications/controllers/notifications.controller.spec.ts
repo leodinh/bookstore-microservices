@@ -14,17 +14,17 @@ describe('NotificationsController', () => {
     itemCount: 1,
   };
 
-  it('acknowledges the RabbitMQ delivery after successful handling', () => {
+  it('acknowledges the RabbitMQ delivery after successful handling', async () => {
     const message = { fields: { deliveryTag: 1 } };
     const channel = { ack: jest.fn(), nack: jest.fn() };
     const notificationsService = {
-      handleOrderCreated: jest.fn(),
+      handleOrderCreated: jest.fn().mockResolvedValue(undefined),
     };
     const controller = new NotificationsController(
       notificationsService as unknown as NotificationsService,
     );
 
-    controller.handleOrderCreated(event, {
+    await controller.handleOrderCreated(event, {
       getChannelRef: () => channel,
       getMessage: () => message,
     } as never);
@@ -34,25 +34,23 @@ describe('NotificationsController', () => {
     expect(channel.nack).not.toHaveBeenCalled();
   });
 
-  it('requeues the delivery when handling fails', () => {
+  it('requeues the delivery when handling fails', async () => {
     const message = { fields: { deliveryTag: 1 } };
     const channel = { ack: jest.fn(), nack: jest.fn() };
     const error = new Error('Notification provider unavailable');
     const notificationsService = {
-      handleOrderCreated: jest.fn(() => {
-        throw error;
-      }),
+      handleOrderCreated: jest.fn().mockRejectedValue(error),
     };
     const controller = new NotificationsController(
       notificationsService as unknown as NotificationsService,
     );
 
-    expect(() =>
+    await expect(
       controller.handleOrderCreated(event, {
         getChannelRef: () => channel,
         getMessage: () => message,
       } as never),
-    ).toThrow(error);
+    ).rejects.toThrow(error);
     expect(channel.ack).not.toHaveBeenCalled();
     expect(channel.nack).toHaveBeenCalledWith(message, false, true);
   });

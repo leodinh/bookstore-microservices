@@ -76,12 +76,18 @@ describe('OrdersRepository', () => {
       create: jest.fn().mockReturnValue(orderItems),
       save: jest.fn().mockResolvedValue(orderItems),
     };
+    const outboxEvent = { id: 'event-id' };
+    const outboxEventsRepository = {
+      create: jest.fn().mockReturnValue(outboxEvent),
+      save: jest.fn().mockResolvedValue(outboxEvent),
+    };
     const manager = {
       getRepository: jest
         .fn()
         .mockReturnValueOnce(booksRepository)
         .mockReturnValueOnce(ordersRepository)
-        .mockReturnValueOnce(orderItemsRepository),
+        .mockReturnValueOnce(orderItemsRepository)
+        .mockReturnValueOnce(outboxEventsRepository),
     };
     const dataSource = {
       transaction: jest.fn((operation: (value: unknown) => unknown) =>
@@ -105,11 +111,21 @@ describe('OrdersRepository', () => {
         },
       ],
     };
+    const outboxInput = {
+      id: 'event-id',
+      eventType: 'orders.order.created',
+      aggregateType: 'order',
+      aggregateId: order.id,
+      payload: { eventId: 'event-id', orderId: order.id },
+      occurredAt: new Date('2026-08-12T12:00:00.000Z'),
+    };
 
     const result = await repository.runInTransaction(async (transaction) => {
       const lockedBooks = await transaction.findBooksForUpdate(['book-id']);
       await transaction.saveBooks(lockedBooks);
-      return transaction.createOrder(input);
+      const saved = await transaction.createOrder(input);
+      await transaction.saveOutboxEvent(outboxInput);
+      return saved;
     });
 
     expect(dataSource.transaction).toHaveBeenCalledTimes(1);
@@ -130,6 +146,11 @@ describe('OrdersRepository', () => {
     expect(orderItemsRepository.create).toHaveBeenCalledWith([
       { ...input.items[0], orderId: order.id },
     ]);
+    expect(outboxEventsRepository.create).toHaveBeenCalledWith({
+      ...outboxInput,
+      nextAttemptAt: expect.any(Date) as Date,
+    });
+    expect(outboxEventsRepository.save).toHaveBeenCalledWith(outboxEvent);
     expect(result).toEqual({ order, items: orderItems });
   });
 });

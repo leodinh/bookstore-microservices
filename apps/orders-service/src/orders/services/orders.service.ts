@@ -5,17 +5,19 @@ import {
   CreateOrderItemRequest,
   CreateOrderRequest,
   CreateOrderResponse,
+  EVENT_PATTERNS,
   GetUserResponse,
   MESSAGE_PATTERNS,
   OrderResponse,
+  OrderCreatedEvent,
 } from '@app/common';
 import { firstValueFrom, timeout, TimeoutError } from 'rxjs';
+import { randomUUID } from 'node:crypto';
 import { QueryFailedError } from 'typeorm';
 import { Book } from '../../../../books-service/src/books/entities/book.entity';
 import { OrderItem } from '../entities/order-item.entity';
 import { Order } from '../entities/order.entity';
 import { OrderStatus } from '../enums/order-status.enum';
-import { OrderEventsPublisher } from '../events/order-events.publisher';
 import {
   NewOrderItemRecord,
   OrdersRepository,
@@ -32,7 +34,6 @@ export class OrdersService {
   constructor(
     @Inject('USERS_SERVICE') private readonly usersClient: ClientProxy,
     private readonly ordersRepository: OrdersRepository,
-    private readonly orderEventsPublisher: OrderEventsPublisher,
   ) {}
 
   async createOrder(request: CreateOrderRequest): Promise<CreateOrderResponse> {
@@ -49,7 +50,7 @@ export class OrdersService {
     await this.ensureUserExists(request.userId, request.correlationId);
 
     try {
-      const createdOrder = await this.ordersRepository.runInTransaction(
+      return await this.ordersRepository.runInTransaction(
         async (transaction) => {
           const books = await transaction.findBooksForUpdate(
             requestedItems.map((item) => item.bookId),
@@ -88,16 +89,24 @@ export class OrdersService {
             items: orderItems,
           });
 
-          return this.toOrderResponse(saved.order, saved.items);
+          const createdOrder = this.toOrderResponse(saved.order, saved.items);
+          const event = this.createOrderCreatedEvent(
+            createdOrder,
+            request.correlationId,
+          );
+
+          await transaction.saveOutboxEvent({
+            id: event.eventId,
+            eventType: EVENT_PATTERNS.orders.created,
+            aggregateType: 'order',
+            aggregateId: createdOrder.id,
+            payload: { ...event },
+            occurredAt: new Date(event.occurredAt),
+          });
+
+          return createdOrder;
         },
       );
-
-      this.orderEventsPublisher.publishOrderCreated(
-        createdOrder,
-        request.correlationId,
-      );
-
-      return createdOrder;
     } catch (error: unknown) {
       if (!this.isIdempotencyKeyConflict(error)) {
         throw error;
@@ -278,6 +287,22 @@ export class OrdersService {
         lineTotal: item.lineTotal,
       })),
       createdAt: order.createdAt.toISOString(),
+    };
+  }
+
+  private createOrderCreatedEvent(
+    order: CreateOrderResponse,
+    correlationId: string,
+  ): OrderCreatedEvent {
+    return {
+      eventId: randomUUID(),
+      occurredAt: order.createdAt,
+      correlationId,
+      orderId: order.id,
+      userId: order.userId,
+      status: order.status,
+      totalAmount: order.totalAmount,
+      itemCount: order.items.length,
     };
   }
 

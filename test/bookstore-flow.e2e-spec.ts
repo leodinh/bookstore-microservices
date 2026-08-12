@@ -2,11 +2,12 @@ import { ValidationPipe } from '@nestjs/common';
 import type { INestApplication, INestMicroservice } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { Transport } from '@nestjs/microservices';
-import type { MicroserviceOptions } from '@nestjs/microservices';
+import type { ClientProxy, MicroserviceOptions } from '@nestjs/microservices';
 import { RpcValidationPipe } from '@app/common';
 import { ApiGatewayModule } from '../apps/api-gateway/src/api-gateway.module';
 import { BooksServiceModule } from '../apps/books-service/src/books-service.module';
 import { OrdersServiceModule } from '../apps/orders-service/src/orders-service.module';
+import { OutboxPublisher } from '../apps/orders-service/src/orders/outbox/outbox.publisher';
 import { NotificationsServiceModule } from '../apps/notifications-service/src/notifications-service.module';
 import { NotificationsService } from '../apps/notifications-service/src/notifications/services/notifications.service';
 import { UsersServiceModule } from '../apps/users-service/src/users-service.module';
@@ -14,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import { Pool } from 'pg';
 import request from 'supertest';
+import { lastValueFrom } from 'rxjs';
 
 interface SignupResponseBody {
   id: string;
@@ -44,12 +46,12 @@ function responseBody<T>(body: unknown): T {
 }
 
 async function waitFor(
-  condition: () => boolean,
+  condition: () => boolean | Promise<boolean>,
   timeoutMs = 5000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
 
-  while (!condition()) {
+  while (!(await condition())) {
     if (Date.now() >= deadline) {
       throw new Error('Timed out waiting for the asynchronous event.');
     }
@@ -80,6 +82,7 @@ describe('Bookstore microservices (e2e)', () => {
   let database: Pool | undefined;
   let userId: string | undefined;
   let bookId: string | undefined;
+  let orderId: string | undefined;
 
   beforeAll(async () => {
     const usersPort = Number(process.env.USERS_SERVICE_PORT);
@@ -128,7 +131,7 @@ describe('Bookstore microservices (e2e)', () => {
     ordersApp = await NestFactory.createMicroservice<MicroserviceOptions>(
       OrdersServiceModule,
       {
-        logger: false,
+        logger: ['error'],
         transport: Transport.TCP,
         options: { host: '127.0.0.1', port: ordersPort },
       },
@@ -159,6 +162,16 @@ describe('Bookstore microservices (e2e)', () => {
 
   afterAll(async () => {
     if (database) {
+      if (orderId) {
+        await database.query('DELETE FROM notifications WHERE order_id = $1', [
+          orderId,
+        ]);
+        await database.query(
+          `DELETE FROM outbox_events
+           WHERE aggregate_type = 'order' AND aggregate_id = $1`,
+          [orderId],
+        );
+      }
       await database.query('DELETE FROM orders WHERE idempotency_key = $1', [
         idempotencyKey,
       ]);
@@ -180,11 +193,12 @@ describe('Bookstore microservices (e2e)', () => {
     ]);
   });
 
-  it('carries an idempotent order from HTTP through TCP and PostgreSQL', async () => {
-    if (!gatewayApp || !database) {
+  it('persists, publishes, and idempotently consumes an order event', async () => {
+    if (!gatewayApp || !ordersApp || !database) {
       throw new Error('The E2E applications did not start.');
     }
 
+    const databaseClient = database;
     const httpServer = gatewayApp.getHttpServer() as Server;
     const signupResponse = await request(httpServer)
       .post('/api/users/signup')
@@ -235,6 +249,7 @@ describe('Bookstore microservices (e2e)', () => {
       .send(orderRequest)
       .expect(200);
     const firstOrder = responseBody<OrderResponseBody>(firstOrderResponse.body);
+    orderId = firstOrder.id;
     expect(firstOrder).toEqual(
       expect.objectContaining({
         totalAmount: '25.00',
@@ -244,6 +259,24 @@ describe('Bookstore microservices (e2e)', () => {
     const firstCorrelationId = firstOrderResponse.get('x-correlation-id');
     expect(firstCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
     expect(firstCorrelationId).not.toBe(duplicatedClientCorrelationId);
+
+    const pendingOutboxResult = await databaseClient.query<{
+      published_at: Date | null;
+      attempts: number;
+    }>(
+      `SELECT published_at, attempts
+       FROM outbox_events
+       WHERE aggregate_type = 'order' AND aggregate_id = $1`,
+      [firstOrder.id],
+    );
+    expect(pendingOutboxResult.rows).toEqual([
+      { published_at: null, attempts: 0 },
+    ]);
+
+    await expect(ordersApp.get(OutboxPublisher).publishPending()).resolves.toBe(
+      1,
+    );
+
     await waitFor(() =>
       Boolean(
         handleOrderCreated?.mock.calls.some(
@@ -264,6 +297,22 @@ describe('Bookstore microservices (e2e)', () => {
         itemCount: 1,
       }),
     );
+    await waitFor(async () => {
+      const result = await databaseClient.query<{ published_at: Date | null }>(
+        `SELECT published_at
+         FROM outbox_events
+         WHERE aggregate_type = 'order' AND aggregate_id = $1`,
+        [firstOrder.id],
+      );
+      return Boolean(result.rows[0]?.published_at);
+    });
+    await waitFor(async () => {
+      const result = await databaseClient.query<{ count: string }>(
+        'SELECT count(*) FROM notifications WHERE order_id = $1',
+        [firstOrder.id],
+      );
+      return result.rows[0]?.count === '1';
+    });
 
     const replayResponse = await request(httpServer)
       .post('/api/orders')
@@ -283,6 +332,28 @@ describe('Bookstore microservices (e2e)', () => {
         ([event]) => event.orderId === firstOrder.id,
       ),
     ).toHaveLength(1);
+
+    if (!publishedEvent) {
+      throw new Error('The order-created event was not received.');
+    }
+
+    const eventsClient = ordersApp.get<ClientProxy>('ORDER_EVENTS');
+    await lastValueFrom(
+      eventsClient.emit('orders.order.created', publishedEvent),
+    );
+    await waitFor(
+      () =>
+        (handleOrderCreated?.mock.calls.filter(
+          ([event]) => event.orderId === firstOrder.id,
+        ).length ?? 0) === 2,
+    );
+
+    const notificationCountAfterRedelivery = await databaseClient.query<{
+      count: string;
+    }>('SELECT count(*) FROM notifications WHERE order_id = $1', [
+      firstOrder.id,
+    ]);
+    expect(notificationCountAfterRedelivery.rows[0]?.count).toBe('1');
 
     const conflictResponse = await request(httpServer)
       .post('/api/orders')
@@ -319,5 +390,42 @@ describe('Bookstore microservices (e2e)', () => {
       [idempotencyKey],
     );
     expect(orderCountResult.rows[0]?.count).toBe('1');
+
+    const outboxResult = await database.query<{
+      id: string;
+      attempts: number;
+      published_at: Date | null;
+    }>(
+      `SELECT id, attempts, published_at
+       FROM outbox_events
+       WHERE aggregate_type = 'order' AND aggregate_id = $1`,
+      [firstOrder.id],
+    );
+    expect(outboxResult.rows).toHaveLength(1);
+    expect(outboxResult.rows[0]).toEqual(
+      expect.objectContaining({
+        id: publishedEvent?.eventId,
+        attempts: expect.any(Number) as number,
+        published_at: expect.any(Date) as Date,
+      }),
+    );
+
+    const notificationResult = await database.query<{
+      event_id: string;
+      order_id: string;
+      type: string;
+    }>(
+      `SELECT event_id, order_id, type
+       FROM notifications
+       WHERE order_id = $1`,
+      [firstOrder.id],
+    );
+    expect(notificationResult.rows).toEqual([
+      {
+        event_id: publishedEvent?.eventId,
+        order_id: firstOrder.id,
+        type: 'ORDER_CONFIRMED',
+      },
+    ]);
   });
 });

@@ -121,6 +121,12 @@ services:
       MICROSERVICE_TIMEOUT_MS: 5000
       RABBITMQ_URL: amqp://bookstore:bookstore@rabbitmq:5672
       RABBITMQ_NOTIFICATIONS_QUEUE: bookstore_notifications
+      OUTBOX_POLL_INTERVAL_MS: 250
+      OUTBOX_BATCH_SIZE: 10
+      OUTBOX_LOCK_TIMEOUT_MS: 30000
+      OUTBOX_PUBLISH_TIMEOUT_MS: 5000
+      OUTBOX_RETRY_BASE_MS: 1000
+      OUTBOX_RETRY_MAX_MS: 60000
     expose:
       - '4003'
     depends_on:
@@ -152,11 +158,14 @@ services:
       args:
         APP_NAME: notifications-service
     environment:
+      DATABASE_URL: postgresql://bookstore:bookstore@postgres:5432/bookstore
       RABBITMQ_URL: amqp://bookstore:bookstore@rabbitmq:5672
       RABBITMQ_NOTIFICATIONS_QUEUE: bookstore_notifications
     depends_on:
       rabbitmq:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
     init: true
     restart: unless-stopped
 

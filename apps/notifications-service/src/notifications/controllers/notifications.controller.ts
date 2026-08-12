@@ -9,15 +9,15 @@ export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @EventPattern(EVENT_PATTERNS.orders.created)
-  handleOrderCreated(
+  async handleOrderCreated(
     @Payload() event: OrderCreatedEvent,
     @Ctx() context: RmqContext,
-  ): void {
+  ): Promise<void> {
     const channel = context.getChannelRef() as unknown as Channel;
     const message = context.getMessage() as unknown as ConsumeMessage;
 
     try {
-      this.notificationsService.handleOrderCreated(event);
+      await this.notificationsService.handleOrderCreated(event);
       channel.ack(message);
     } catch (error: unknown) {
       channel.nack(message, false, true);

@@ -14,7 +14,9 @@ API Gateway :3000
                     |
                     +-- TCP --> Users
                     |
-                    +-- emit --> RabbitMQ --> Notifications
+                    +-- same DB transaction --> Outbox table
+                                                |
+                                                +-- worker --> RabbitMQ --> Notifications --> PostgreSQL
 ```
 
 The Gateway is the only public application. Clients cannot choose arbitrary TCP message patterns; a controlled route registry maps each allowed HTTP method and path to a known microservice command.
@@ -125,9 +127,32 @@ The Gateway validates the request, sends the controlled `orders.order.create` TC
 
 Nest `ClientProxy.send()` is request-response communication. The caller waits for one handler to return a value, so it is appropriate when the next decision requires the answer. The Gateway uses `send()` for HTTP-to-TCP routing, and Orders uses it to verify a user before committing an order.
 
-Nest `ClientProxy.emit()` publishes a fact and does not wait for a consumer result. After a new order transaction commits, Orders emits the string pattern `orders.order.created` to the durable `bookstore_notifications` RabbitMQ queue. Notifications consumes it with `@EventPattern`.
+Nest `ClientProxy.emit()` publishes a fact and does not wait for a business response. The Orders outbox worker uses it to publish the string pattern `orders.order.created` to the durable `bookstore_notifications` RabbitMQ queue. Notifications consumes it with `@EventPattern`.
 
-The event includes an event ID, occurrence time, order and user IDs, total, item count, and the original correlation ID. An idempotent replay returns the existing order without publishing another creation event.
+The event includes an event ID, occurrence time, order and user IDs, total, item count, and the original correlation ID. An idempotent HTTP replay returns the existing order without creating another outbox event.
+
+## Transactional outbox
+
+Creating an order changes two systems: PostgreSQL stores the order, while RabbitMQ transports the event. PostgreSQL cannot atomically commit a RabbitMQ message, so calling `emit()` directly after the database transaction creates a failure window: the order may commit and then the process may stop before publication.
+
+The transactional outbox closes that gap:
+
+```text
+1. Begin PostgreSQL transaction
+2. Save order, order items, and inventory changes
+3. Save orders.order.created in outbox_events
+4. Commit everything together
+5. Background worker claims pending outbox rows
+6. Worker emits each event to RabbitMQ
+7. RabbitMQ acceptance succeeds → mark published_at
+8. Publication fails → save the error and retry time
+```
+
+If step 4 rolls back, neither the order nor its event exists. If the service stops after step 4, the event remains in PostgreSQL for a later worker attempt. `FOR UPDATE SKIP LOCKED` plus a worker lease lets several Orders replicas claim different rows without normally publishing the same row concurrently. Expired leases allow another worker to recover work from a stopped replica.
+
+There is still a smaller duplication window: RabbitMQ can accept an event and the worker can stop before setting `published_at`. The recovered worker then publishes that event again. This is why the delivery contract is **at least once**, not exactly once.
+
+Notifications handles that correctly by storing `event_id` under a unique database constraint and inserting with `ON CONFLICT DO NOTHING`. The RabbitMQ handler acknowledges both a newly created notification and an already-processed event; it requeues only a real processing failure.
 
 Notifications uses manual RabbitMQ acknowledgements:
 
@@ -136,9 +161,7 @@ handler succeeds → ack → RabbitMQ removes the delivery
 handler fails    → nack + requeue → RabbitMQ can deliver it again
 ```
 
-Manual acknowledgement provides at-least-once delivery behavior, so real side effects such as sending email must eventually be idempotent. This milestone logs the notification rather than calling an external email provider.
-
-This implementation publishes only after the PostgreSQL transaction commits, so it never announces an order that rolled back. A small dual-write failure window still exists: the process could stop after the database commit but before RabbitMQ accepts the event. A production-grade next step is a transactional outbox, followed by retry limits and a dead-letter queue for events that repeatedly fail.
+Manual acknowledgement and the outbox together provide at-least-once delivery. This milestone persists an in-app notification; a future email or WebSocket side effect must use the same event ID to remain idempotent. Retry limits and a dead-letter queue are the next production-hardening steps for events that repeatedly fail.
 
 ## Correlation IDs
 
@@ -155,8 +178,9 @@ Correlation IDs trace one network attempt. Idempotency keys identify one logical
 - A microservice that exceeds the response deadline becomes `504 MICROSERVICE_TIMEOUT`.
 - PostgreSQL transactions and row locks prevent partial orders and lost inventory updates.
 - A unique persisted idempotency key prevents duplicate orders across retries and replicas.
+- An outbox row is committed atomically with every new order and retried independently of the request.
 - RabbitMQ uses a durable queue and persistent messages for order-created events.
-- Notifications acknowledges an event only after successful handling.
+- Notifications acknowledges an event only after persistent, idempotent handling.
 
 The built-in throttle store is in memory and is appropriate for local development. A production deployment with multiple Gateway replicas should use shared throttle storage.
 
@@ -168,7 +192,7 @@ Fast unit tests exercise controllers, services, repositories, validation, routin
 pnpm test
 ```
 
-The E2E suite starts the real Gateway, all three TCP microservices, and a Notifications RabbitMQ consumer. It creates isolated test records, verifies PostgreSQL and event state, and removes database records afterward:
+The E2E suite starts the real Gateway, all three TCP microservices, and a Notifications RabbitMQ consumer. It deliberately disables automatic outbox polling, proves the order and pending event commit first, publishes the event, redelivers it, and verifies that only one notification is stored. It removes its isolated database records afterward:
 
 ```bash
 docker compose up -d postgres rabbitmq

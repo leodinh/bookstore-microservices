@@ -3,6 +3,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { Book } from '../../../../books-service/src/books/entities/book.entity';
 import { OrderItem } from '../entities/order-item.entity';
 import { Order } from '../entities/order.entity';
+import { OutboxEvent } from '../entities/outbox-event.entity';
 import { OrderStatus } from '../enums/order-status.enum';
 
 export interface NewOrderItemRecord {
@@ -27,10 +28,20 @@ export interface SavedOrderRecord {
   items: OrderItem[];
 }
 
+export interface NewOutboxEventRecord {
+  id: string;
+  eventType: string;
+  aggregateType: string;
+  aggregateId: string;
+  payload: Record<string, unknown>;
+  occurredAt: Date;
+}
+
 export interface OrdersTransaction {
   findBooksForUpdate: (bookIds: string[]) => Promise<Book[]>;
   saveBooks: (books: Book[]) => Promise<void>;
   createOrder: (input: NewOrderRecord) => Promise<SavedOrderRecord>;
+  saveOutboxEvent: (input: NewOutboxEventRecord) => Promise<void>;
 }
 
 @Injectable()
@@ -71,6 +82,7 @@ export class OrdersRepository {
     const booksRepository = manager.getRepository(Book);
     const ordersRepository = manager.getRepository(Order);
     const orderItemsRepository = manager.getRepository(OrderItem);
+    const outboxEventsRepository = manager.getRepository(OutboxEvent);
 
     return {
       findBooksForUpdate: (bookIds) => {
@@ -108,6 +120,14 @@ export class OrdersRepository {
         );
 
         return { order, items };
+      },
+      saveOutboxEvent: async (input) => {
+        await outboxEventsRepository.save(
+          outboxEventsRepository.create({
+            ...input,
+            nextAttemptAt: new Date(),
+          }),
+        );
       },
     };
   }
