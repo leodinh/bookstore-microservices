@@ -131,29 +131,6 @@ Nest `ClientProxy.emit()` publishes a fact and does not wait for a business resp
 
 The event includes an event ID, occurrence time, order and user IDs, total, item count, and the original correlation ID. An idempotent HTTP replay returns the existing order without creating another outbox event.
 
-## Transactional outbox
-
-Creating an order changes two systems: PostgreSQL stores the order, while RabbitMQ transports the event. PostgreSQL cannot atomically commit a RabbitMQ message, so calling `emit()` directly after the database transaction creates a failure window: the order may commit and then the process may stop before publication.
-
-The transactional outbox closes that gap:
-
-```text
-1. Begin PostgreSQL transaction
-2. Save order, order items, and inventory changes
-3. Save orders.order.created in outbox_events
-4. Commit everything together
-5. Background worker claims pending outbox rows
-6. Worker emits each event to RabbitMQ
-7. RabbitMQ acceptance succeeds → mark published_at
-8. Publication fails → save the error and retry time
-```
-
-If step 4 rolls back, neither the order nor its event exists. If the service stops after step 4, the event remains in PostgreSQL for a later worker attempt. `FOR UPDATE SKIP LOCKED` plus a worker lease lets several Orders replicas claim different rows without normally publishing the same row concurrently. Expired leases allow another worker to recover work from a stopped replica.
-
-There is still a smaller duplication window: RabbitMQ can accept an event and the worker can stop before setting `published_at`. The recovered worker then publishes that event again. This is why the delivery contract is **at least once**, not exactly once.
-
-Notifications handles that correctly by storing `event_id` under a unique database constraint and inserting with `ON CONFLICT DO NOTHING`. The RabbitMQ handler acknowledges both a newly created notification and an already-processed event; it requeues only a real processing failure.
-
 Notifications uses manual RabbitMQ acknowledgements:
 
 ```text
