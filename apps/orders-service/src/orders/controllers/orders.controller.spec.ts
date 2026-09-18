@@ -1,0 +1,63 @@
+import { OrdersService } from '../services/orders.service';
+import { OrdersController } from './orders.controller';
+
+describe('OrdersController', () => {
+  const correlationId = '5af19211-f08a-4c42-93e3-08cf638b739c';
+
+  it('delegates the get-order message to the service', async () => {
+    const response = { id: 'order-id' };
+    const ordersService = {
+      getOrder: jest.fn().mockResolvedValue(response),
+    };
+    const controller = new OrdersController(
+      ordersService as unknown as OrdersService,
+    );
+
+    await expect(
+      controller.getOrder({ id: 'order-id', correlationId }),
+    ).resolves.toBe(response);
+    expect(ordersService.getOrder).toHaveBeenCalledWith('order-id');
+  });
+
+  it('delegates the user-order-list message to the service', async () => {
+    const response = [{ id: 'order-id' }];
+    const ordersService = {
+      listUserOrders: jest.fn().mockResolvedValue(response),
+    };
+    const controller = new OrdersController(
+      ordersService as unknown as OrdersService,
+    );
+
+    await expect(
+      controller.listUserOrders({ userId: 'user-id', correlationId }),
+    ).resolves.toBe(response);
+    expect(ordersService.listUserOrders).toHaveBeenCalledWith(
+      'user-id',
+      correlationId,
+    );
+  });
+
+  it('delegates the create-order message to the service', async () => {
+    const request = {
+      correlationId,
+      idempotencyKey: '37dc7ca6-c5b3-4e55-aa46-606fe18d33c4',
+      userId: '67f76ed1-bdcc-4286-9e3f-123fb4ab571e',
+      items: [
+        {
+          bookId: 'd92eb1d3-6ca5-4ae1-a463-1ce744949e95',
+          quantity: 1,
+        },
+      ],
+    };
+    const response = { id: 'order-id' };
+    const ordersService = {
+      createOrder: jest.fn().mockResolvedValue(response),
+    };
+    const controller = new OrdersController(
+      ordersService as unknown as OrdersService,
+    );
+
+    await expect(controller.createOrder(request)).resolves.toBe(response);
+    expect(ordersService.createOrder).toHaveBeenCalledWith(request);
+  });
+});
